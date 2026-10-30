@@ -9,3 +9,9 @@ prototype
 .github
 **/__pycache__
 .pytest_cache
+node_modules
+.neon
+neon.ts
+package.json
+package-lock.json
+*.xlsx

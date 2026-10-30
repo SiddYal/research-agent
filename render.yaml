@@ -1,5 +1,6 @@
-# Render blueprint: one Docker web service. Point DATABASE_URL at a Neon
-# Postgres database (pgvector is available on Neon; the migration enables it).
+# Render blueprint: one Docker web service. Copy the values `neon deploy` wrote to
+# .env: DATABASE_URL (pooled) and DATABASE_URL_UNPOOLED (direct, for migrations);
+# the migration enables pgvector. The AWS_* values store reports in Neon's bucket.
 services:
   - type: web
     name: research-agent
@@ -10,6 +11,18 @@ services:
       - key: OPENAI_API_KEY
         sync: false
       - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
+      - key: REPORTS_BUCKET
+        value: assets
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_ENDPOINT_URL_S3
+        sync: false
+      - key: AWS_REGION
         sync: false
       - key: DAILY_COST_CAP_USD
         value: "2.00"

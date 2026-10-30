@@ -149,7 +149,9 @@ for the full list.
 |---|---|---|
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | – | at least one is required |
 | `LLM_PROVIDER` | auto | `openai` or `anthropic` |
-| `DATABASE_URL` | `sqlite:///./data/research.db` | e.g. `postgresql+psycopg://…` |
+| `DATABASE_URL` | `sqlite:///./data/research.db` | or a Postgres URL (`postgres://…` works) |
+| `DATABASE_URL_UNPOOLED` | – | direct Postgres URL for migrations when `DATABASE_URL` is a pooler |
+| `REPORTS_BUCKET` | – | also store reports in S3-compatible storage (with the `AWS_*` variables) |
 | `MAX_SOURCES` | 15 | sources fetched per job |
 | `MAX_VERIFICATION_ROUNDS` | 1 | follow-up search rounds for uncorroborated claims |
 | `RERANKER` | `llm` | `llm` or `none` |
@@ -173,8 +175,21 @@ SQLite and Postgres + pgvector, and builds the Docker image.
 
 ## Deployment
 
-A [render.yaml](render.yaml) blueprint deploys the Docker image to Render. Point `DATABASE_URL`
-at a Neon Postgres database; the migration enables pgvector. Railway works the same way.
+**Neon** provides the database and the report bucket. [neon.ts](neon.ts) declares them; with the
+[Neon CLI](https://neon.com/docs/cli) (`npm i -g neon`):
+
+```bash
+neon login
+neon deploy        # creates the bucket, writes DATABASE_URL, DATABASE_URL_UNPOOLED and AWS_* to .env
+```
+
+Add `REPORTS_BUCKET=assets` to `.env` to store reports there as well. The app sends queries
+through Neon's connection pooler and runs migrations and LangGraph checkpoints over the direct
+connection; the first start enables pgvector. Finished jobs keep the bucket keys in Postgres, and
+`GET /research/{id}` returns short-lived signed links (`artifacts`), since the bucket is private.
+
+A [render.yaml](render.yaml) blueprint deploys the Docker image to Render with those same
+variables. Railway works the same way.
 
 ## Security posture
 

@@ -20,6 +20,9 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://research:research@db:5432/research
+      # Self-contained: ignore any Neon direct URL or bucket that .env carries.
+      DATABASE_URL_UNPOOLED: ""
+      REPORTS_BUCKET: ""
       REPORTS_DIR: /app/data/reports
     depends_on:
       db:

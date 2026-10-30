@@ -36,6 +36,7 @@ from research_agent.llm import (
 from research_agent.logging import get_logger
 from research_agent.nodes import Deps
 from research_agent.state import ResearchState, TimelineEvent
+from research_agent.storage import make_artifact_store
 from research_agent.tools.fetch import PageFetcher
 from research_agent.tools.search import make_search
 
@@ -82,6 +83,7 @@ class ResearchService:
         self.deps = deps
         self.deps.on_event = self._record_event
         self.checkpointer = checkpointer or make_checkpointer(self.settings)
+        self.artifacts = make_artifact_store(self.settings)
         # One compiled graph per model, all sharing the checkpointer; the default model's
         # graph also serves state reads, since every graph has the same shape.
         self.default_model = self.models[0].id if self.models else self.deps.llm.model
@@ -198,6 +200,7 @@ class ResearchService:
                 for e in events
             ],
             "has_report": job.report is not None,
+            "artifacts": self.artifact_links(job),
         }
 
     def list_jobs(self, limit: int = 20) -> list[dict]:
@@ -259,13 +262,14 @@ class ResearchService:
         elif not snap.next and st and st.report:
             status = "completed"
             evaluation = finalize_totals(st.evaluation, st) if st.evaluation else None
+            result = self._result_summary(st)
+            result["artifacts"] = self._save_artifacts(st, evaluation)
             fields.update(
                 report=st.report,
                 evaluation=evaluation.model_dump() if evaluation else None,
-                result=self._result_summary(st),
+                result=result,
                 completed_at=_utcnow(),
             )
-            self._save_artifacts(st, evaluation)
         else:
             status = "failed"
             fields["error"] = "workflow stopped unexpectedly"
@@ -284,15 +288,39 @@ class ResearchService:
             "errors": st.errors,
         }
 
-    def _save_artifacts(self, st: ResearchState, evaluation) -> None:
+    def _save_artifacts(self, st: ResearchState, evaluation) -> dict[str, str]:
+        """Write the report and full run record locally, and to object storage when configured.
+
+        Returns the object keys that were uploaded ({} without a store). An upload failure
+        is logged, not raised: the report is already safe in the database.
+        """
+        files = {
+            "report.md": ((st.report or "").encode("utf-8"), "text/markdown; charset=utf-8"),
+            "run.json": (json.dumps({"state": st.model_dump(mode="json", exclude={"chunks"}),
+                                     "evaluation": evaluation.model_dump() if evaluation else None},
+                                    indent=2).encode("utf-8"), "application/json"),
+        }
         out = Path(self.settings.reports_dir)
         out.mkdir(parents=True, exist_ok=True)
-        (out / f"{st.job_id}.md").write_text(st.report or "", encoding="utf-8")
-        (out / f"{st.job_id}.json").write_text(
-            json.dumps({"state": st.model_dump(mode="json", exclude={"chunks"}),
-                        "evaluation": evaluation.model_dump() if evaluation else None}, indent=2),
-            encoding="utf-8",
-        )
+        (out / f"{st.job_id}.md").write_bytes(files["report.md"][0])
+        (out / f"{st.job_id}.json").write_bytes(files["run.json"][0])
+
+        keys: dict[str, str] = {}
+        if self.artifacts is not None:
+            for name, (body, content_type) in files.items():
+                key = f"reports/{st.job_id}/{name}"
+                try:
+                    self.artifacts.put(key, body, content_type)
+                    keys[name] = key
+                except Exception:
+                    log.exception("artifact_upload_failed", key=key)
+        return keys
+
+    def artifact_links(self, job: ResearchJob) -> dict[str, str]:
+        keys = (job.result or {}).get("artifacts") or {}
+        if self.artifacts is None:
+            return {}
+        return {name: self.artifacts.url(key) for name, key in keys.items()}
 
     def _update(self, job_id: str, **fields) -> None:
         with session_scope() as s:

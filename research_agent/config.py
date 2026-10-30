@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,10 +39,20 @@ class Settings(BaseSettings):
     max_verification_rounds: int = 1
     llm_sanitizer: bool = True
 
-    # Storage
+    # Storage. On Neon, DATABASE_URL is the pooled endpoint for app queries and
+    # DATABASE_URL_UNPOOLED the direct one for migrations and the checkpointer.
     database_url: str = "sqlite:///./data/research.db"
+    database_url_unpooled: str | None = None
     checkpoint_url: str | None = None  # defaults to a sibling of database_url
     reports_dir: str = "./data/reports"
+
+    # Object storage for report artifacts (any S3-compatible service; `neon deploy`
+    # writes the AWS_* variables). Off unless REPORTS_BUCKET is set.
+    reports_bucket: str | None = None
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    aws_endpoint_url_s3: str | None = None
+    aws_region: str | None = None
 
     # Guardrails for the public API
     rate_limit: str = "5/minute"
@@ -51,6 +62,27 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
     log_json: bool = False
+
+    @field_validator("database_url", "database_url_unpooled", "checkpoint_url", mode="after")
+    @classmethod
+    def _psycopg_driver(cls, url: str | None) -> str | None:
+        """Hosted Postgres (Neon, Render) hands out postgres:// URLs; SQLAlchemy needs the driver named."""
+        if not url:
+            return None
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                return "postgresql+psycopg://" + url.removeprefix(prefix)
+        return url
+
+    @field_validator("reports_bucket", mode="after")
+    @classmethod
+    def _blank_is_none(cls, v: str | None) -> str | None:
+        return v or None
+
+    @property
+    def migration_url(self) -> str:
+        """Direct connection for schema changes (a pooler can't hold session state)."""
+        return self.database_url_unpooled or self.database_url
 
     @property
     def provider(self) -> Literal["openai", "anthropic"]:

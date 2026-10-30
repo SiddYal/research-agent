@@ -80,6 +80,58 @@ def test_job_state_survives_restart(settings, sql_deps, tmp_path):
     assert second.approve(job_id, background=False) == "completed"
 
 
+def test_init_db_creates_missing_data_folder(tmp_path):
+    """A fresh clone has no data/ folder (it's git-ignored); startup must create it."""
+    import sqlalchemy as sa
+
+    from research_agent.db.session import init_db
+
+    db = tmp_path / "fresh" / "data" / "research.db"
+    init_db(f"sqlite:///{db.as_posix()}")
+    assert "research_jobs" in sa.inspect(sa.create_engine(f"sqlite:///{db.as_posix()}")).get_table_names()
+
+
+def test_hosted_postgres_urls_get_the_psycopg_driver(settings):
+    from research_agent.config import Settings
+
+    neon = Settings(_env_file=None, database_url="postgresql://u:p@ep-x-pooler.neon.tech/db?sslmode=require",
+                    database_url_unpooled="postgres://u:p@ep-x.neon.tech/db?sslmode=require")
+    assert neon.database_url.startswith("postgresql+psycopg://u:p@ep-x-pooler.")
+    assert neon.migration_url == "postgresql+psycopg://u:p@ep-x.neon.tech/db?sslmode=require"
+    local = Settings(_env_file=None, database_url="sqlite:///./x.db", database_url_unpooled=None)
+    assert local.migration_url == "sqlite:///./x.db"
+
+
+class FakeStore:
+    def __init__(self, fail=False):
+        self.objects, self.fail = {}, fail
+
+    def put(self, key, body, content_type):
+        if self.fail:
+            raise ConnectionError("bucket unreachable")
+        self.objects[key] = (body, content_type)
+
+    def url(self, key, expires_s=3600):
+        return f"https://storage.test/{key}?signed"
+
+
+def test_completed_job_uploads_artifacts_and_links_them(svc):
+    svc.artifacts = FakeStore()
+    job_id = svc.create_job("What are the key facts about the Eiffel Tower?", auto_approve=True)
+    assert svc.run(job_id) == "completed"
+    assert set(svc.artifacts.objects) == {f"reports/{job_id}/report.md", f"reports/{job_id}/run.json"}
+    body, ctype = svc.artifacts.objects[f"reports/{job_id}/report.md"]
+    assert body.decode() == svc.get_job_row(job_id).report and ctype.startswith("text/markdown")
+    assert svc.get_job(job_id)["artifacts"]["report.md"].startswith(f"https://storage.test/reports/{job_id}/")
+
+
+def test_storage_outage_does_not_fail_the_job(svc):
+    svc.artifacts = FakeStore(fail=True)
+    job_id = svc.create_job("What are the key facts about the Eiffel Tower?", auto_approve=True)
+    assert svc.run(job_id) == "completed"
+    assert svc.get_job(job_id)["artifacts"] == {} and svc.get_job_row(job_id).report
+
+
 def test_spent_today_counts_cost_and_reserves_active_jobs(svc, settings):
     from research_agent.db import ResearchJob, session_scope
 

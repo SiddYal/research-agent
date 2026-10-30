@@ -25,6 +25,12 @@ anyio==4.15.1
     #   watchfiles
 babel==2.18.0
     # via courlan
+boto3==1.43.123
+    # via -r requirements.in
+botocore==1.43.123
+    # via
+    #   boto3
+    #   s3transfer
 certifi==2026.10.23
     # via
     #   httpcore
@@ -87,6 +93,10 @@ jiter==0.18.0
     # via
     #   anthropic
     #   openai
+jmespath==1.1.0
+    # via
+    #   boto3
+    #   botocore
 jsonpatch==1.37
     # via langchain-core
 jsonpointer==3.5
@@ -192,8 +202,9 @@ pydantic-settings==2.16.1
     # via -r requirements.in
 pygments==2.21.0
     # via rich
-python-dateutil==3.0.0
+python-dateutil==2.9.0.post0
     # via
+    #   botocore
     #   dateparser
     #   htmldate
 python-dotenv==1.2.4
@@ -222,6 +233,8 @@ requests-toolbelt==1.0.0
     # via langsmith
 rich==15.0.0
     # via -r requirements.in
+s3transfer==0.19.3
+    # via boto3
 six==1.17.0
     # via python-dateutil
 slowapi==0.1.10
@@ -281,12 +294,12 @@ typing-inspection==0.4.4
 tzdata==2026.5
     # via
     #   psycopg
-    #   python-dateutil
     #   tzlocal
 tzlocal==5.4.5
     # via dateparser
 urllib3==2.8.0
     # via
+    #   botocore
     #   courlan
     #   htmldate
     #   requests

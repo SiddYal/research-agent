@@ -102,7 +102,8 @@ def _serde() -> JsonPlusSerializer:
 
 def make_checkpointer(settings: Settings | None = None) -> BaseCheckpointSaver:
     settings = settings or get_settings()
-    url = settings.checkpoint_url or settings.database_url
+    # Direct connection: setup() migrates tables, and every statement is prepared.
+    url = settings.checkpoint_url or settings.migration_url
     if url.startswith("postgresql"):
         from langgraph.checkpoint.postgres import PostgresSaver
         from psycopg.rows import dict_row

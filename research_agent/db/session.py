@@ -14,10 +14,15 @@ from research_agent.config import get_settings
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def ensure_sqlite_dir(url: str) -> None:
+    """SQLite creates the file but not its folder (data/ is absent in a fresh clone)."""
+    if url.startswith("sqlite:///") and ":memory:" not in url:
+        Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
+
+
 def _make_engine(url: str) -> Engine:
     if url.startswith("sqlite"):
-        if url.startswith("sqlite:///") and ":memory:" not in url:
-            Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
+        ensure_sqlite_dir(url)
         engine = create_engine(url, connect_args={"check_same_thread": False})
 
         @event.listens_for(engine, "connect")
@@ -25,7 +30,10 @@ def _make_engine(url: str) -> Engine:
             dbapi_conn.execute("PRAGMA foreign_keys=ON")
 
         return engine
-    return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5)
+    # A PgBouncer pooler (Neon's "-pooler" host) runs in transaction mode, where
+    # server-side prepared statements can land on another backend.
+    connect_args = {"prepare_threshold": None} if "-pooler." in url else {}
+    return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5, connect_args=connect_args)
 
 
 @lru_cache
@@ -51,13 +59,13 @@ def session_scope() -> Iterator[Session]:
         session.close()
 
 
-def init_db() -> None:
+def init_db(url: str | None = None) -> None:
     """Bring the schema up to date with Alembic (the single source of truth)."""
     from alembic import command
     from alembic.config import Config
 
     cfg = Config(str(ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(ROOT / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", get_settings().database_url)
+    cfg.set_main_option("sqlalchemy.url", url or get_settings().migration_url)
     cfg.attributes["configure_logger"] = False  # keep the app's logging config
     command.upgrade(cfg, "head")

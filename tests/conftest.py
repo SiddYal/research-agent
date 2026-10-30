@@ -7,6 +7,10 @@ from pathlib import Path
 _tmp = Path(tempfile.mkdtemp(prefix="research-agent-tests-"))
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_tmp.as_posix()}/test.db")
 os.environ["REPORTS_DIR"] = str(_tmp / "reports")
+# Never reach real infrastructure from .env (e.g. Neon's direct URL or bucket);
+# only what's set explicitly in the environment, as for DATABASE_URL.
+os.environ.setdefault("DATABASE_URL_UNPOOLED", "")
+os.environ.setdefault("REPORTS_BUCKET", "")
 os.environ.setdefault("OPENAI_API_KEY", "test-key-not-used")
 os.environ["LLM_PROVIDER"] = "openai"
 
