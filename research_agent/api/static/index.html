@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Research Agent</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='10' cy='10' r='6' fill='none' stroke='%232f5bd3' stroke-width='2.5'/><path d='M14.5 14.5 20 20' stroke='%232f5bd3' stroke-width='2.5' stroke-linecap='round'/></svg>">
+<style>
+  :root {
+    --bg: #f6f6f3; --panel: #ffffff; --text: #1c1c1a; --muted: #686862; --line: #e2e1da;
+    --soft: #efeee8; --accent: #2f5bd3; --accent-soft: #e8eefc; --on-accent: #ffffff;
+    --ok: #1d7a4b; --ok-soft: #e4f3ea; --warn: #8f6200; --warn-soft: #fbf1dc;
+    --bad: #b3261e; --bad-soft: #fbe7e5; --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --panel: #1d1d1b; --text: #ecebe6; --muted: #a3a29b; --line: #33322e;
+      --soft: #262623; --accent: #7f9dff; --accent-soft: #232b45; --on-accent: #0f0f0e;
+      --ok: #62c793; --ok-soft: #19301f; --warn: #e3b14c; --warn-soft: #33290f;
+      --bad: #ff7d72; --bad-soft: #3a1c19;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { border-bottom: 1px solid var(--line); background: var(--panel); }
+  .bar { max-width: 1180px; margin: 0 auto; padding: 14px 16px; display: flex; align-items: center; gap: 10px; }
+  .bar h1 { font-size: 1.1rem; margin: 0; }
+  .bar .tag { color: var(--muted); font-size: .9rem; }
+  @media (max-width: 640px) { .bar .tag { display: none; } }
+  .layout { max-width: 1180px; margin: 0 auto; padding: 24px 16px 64px; display: grid;
+            grid-template-columns: minmax(0, 1fr) 280px; gap: 24px; align-items: start; }
+  @media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } aside { order: 2; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+           padding: 20px; margin-bottom: 16px; }
+  .panel > h2 { font-size: 1rem; margin: 0 0 12px; }
+  label.field { display: block; font-size: .85rem; font-weight: 600; margin-bottom: 6px; }
+  select, textarea, input[type=text] { width: 100%; font: inherit; color: inherit; background: var(--bg);
+           border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; }
+  select:focus, textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  textarea { min-height: 96px; resize: vertical; }
+  .grid2 { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 640px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+  .spacer { flex: 1; }
+  button { font: inherit; font-weight: 600; border: 1px solid var(--accent); background: var(--accent);
+           color: var(--on-accent); border-radius: 8px; padding: 8px 16px; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); }
+  button.plain { background: transparent; border-color: var(--line); color: var(--text); font-weight: 500; }
+  button.danger { background: transparent; border-color: var(--bad); color: var(--bad); }
+  button:disabled { opacity: .5; cursor: default; }
+  .check { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: .92rem; }
+  .hint { color: var(--muted); font-size: .85rem; margin: 6px 0 0; }
+  .error { background: var(--bad-soft); color: var(--bad); border-radius: 8px; padding: 10px 12px;
+           margin-top: 12px; white-space: pre-wrap; font-size: .92rem; }
+  .hidden { display: none !important; }
+
+  .jobhead { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+  .jobhead .q { font-weight: 600; flex: 1 1 320px; }
+  .chip { display: inline-block; font-size: .78rem; font-weight: 600; border-radius: 999px; padding: 2px 10px;
+          background: var(--soft); color: var(--muted); white-space: nowrap; }
+  .chip.completed { background: var(--ok-soft); color: var(--ok); }
+  .chip.failed, .chip.rejected { background: var(--bad-soft); color: var(--bad); }
+  .chip.running, .chip.queued { background: var(--accent-soft); color: var(--accent); }
+  .chip.awaiting_approval { background: var(--warn-soft); color: var(--warn); }
+  .meta { color: var(--muted); font-size: .85rem; margin-top: 4px; }
+
+  ol.steps { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 6px;
+             grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+  ol.steps li { display: flex; gap: 8px; align-items: center; font-size: .9rem; color: var(--muted); }
+  .dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); flex: none;
+         display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+  li.done { color: var(--text); } li.done .dot { background: var(--ok); border-color: var(--ok); color: var(--on-accent); }
+  li.active { color: var(--accent); font-weight: 600; }
+  li.active .dot { border-color: var(--accent); border-top-color: transparent; animation: spin .9s linear infinite; }
+  li.waiting { color: var(--warn); font-weight: 600; } li.waiting .dot { border-color: var(--warn); }
+  li.failed { color: var(--bad); font-weight: 600; } li.failed .dot { border-color: var(--bad); color: var(--bad); }
+  .steps .t { margin-left: auto; font-size: .78rem; color: var(--muted); font-weight: 400; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { li.active .dot { animation: none; } }
+
+  .plan-k { font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 4px; }
+  .subq { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; }
+  .subq .n { font-weight: 700; color: var(--muted); padding-top: 9px; width: 26px; flex: none; font-size: .9rem; }
+  .subq .body { flex: 1; min-width: 0; }
+  .subq small { display: block; color: var(--muted); font-size: .8rem; margin-top: 3px; overflow-wrap: anywhere; }
+  .subq button { padding: 6px 10px; margin-top: 2px; }
+
+  .scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .score { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .score b { display: block; font-size: 1.2rem; }
+  .score span { color: var(--muted); font-size: .78rem; }
+  article { overflow-wrap: anywhere; }
+  article h1 { font-size: 1.5rem; line-height: 1.3; margin-top: 0; }
+  article h2 { font-size: 1.15rem; margin-top: 1.8em; padding-top: .6em; border-top: 1px solid var(--line); }
+  article h3 { font-size: 1rem; }
+  article a { color: var(--accent); }
+  article sup.cite a { text-decoration: none; font-size: .78rem; font-weight: 600; }
+  article li:target { background: var(--warn-soft); border-radius: 4px; }
+  article code { background: var(--soft); padding: 1px 5px; border-radius: 4px; }
+
+  aside h2 { font-size: .95rem; margin: 0 0 10px; }
+  .recent { list-style: none; margin: 0; padding: 0; }
+  .recent li { border-top: 1px solid var(--line); }
+  .recent li:first-child { border-top: 0; }
+  .recent a { display: block; padding: 10px 2px; color: inherit; text-decoration: none; }
+  .recent a:hover .rq, .recent a.current .rq { color: var(--accent); }
+  .rq { font-size: .9rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .recent .meta { display: flex; gap: 8px; align-items: center; }
+  .empty { color: var(--muted); font-size: .9rem; }
+  footer { color: var(--muted); font-size: .8rem; text-align: center; padding: 0 16px 24px; }
+</style>
+</head>
+<body>
+<header><div class="bar"><h1>Research Agent</h1><span class="tag">— plans, searches, verifies, and writes a cited report</span></div></header>
+
+<div class="layout">
+<main>
+  <!-- 1. Ask -->
+  <section class="panel" id="ask">
+    <div class="grid2">
+      <div>
+        <label class="field" for="model">AI model</label>
+        <select id="model"><option>Loading…</option></select>
+      </div>
+      <div>
+        <label class="field" for="question">Research question</label>
+        <textarea id="question" maxlength="500"
+          placeholder="e.g. How do pgvector, Pinecone and Weaviate compare for retrieval-augmented generation?"></textarea>
+        <p class="hint"><span id="count">0</span>/500 characters. Specific, comparative questions work best.</p>
+      </div>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="auto"> Skip the plan review and start right away</label>
+      <span class="spacer"></span>
+      <button id="submit">Start research</button>
+    </div>
+    <div id="submit-error" class="error hidden"></div>
+  </section>
+
+  <!-- 2. Progress -->
+  <section class="panel hidden" id="job">
+    <div class="jobhead"><span class="q" id="job-q"></span><span class="chip" id="job-status"></span></div>
+    <div class="meta" id="job-meta"></div>
+    <ol class="steps" id="steps"></ol>
+    <div id="job-error" class="error hidden"></div>
+    <div class="row hidden" id="retry-row"><button id="retry" class="ghost">Retry from where it stopped</button></div>
+  </section>
+
+  <!-- 3. Approval -->
+  <section class="panel hidden" id="plan">
+    <h2>Review the research plan</h2>
+    <p class="hint" style="margin:0">Edit, remove, or add subquestions, then approve. Nothing is searched until you do.</p>
+    <div class="plan-k">Objective</div><div id="objective"></div>
+    <div class="plan-k">Scope</div><div id="scope"></div>
+    <div class="plan-k">Subquestions</div>
+    <div id="subqs"></div>
+    <button id="add-subq" class="plain">+ Add subquestion</button>
+    <div class="row">
+      <button id="reject" class="danger">Reject plan</button>
+      <span class="spacer"></span>
+      <button id="approve">Approve and research</button>
+    </div>
+  </section>
+
+  <!-- 4. Report -->
+  <section class="panel hidden" id="result">
+    <div class="row" style="margin:0 0 16px">
+      <h2 style="margin:0;font-size:1rem">Report</h2>
+      <span class="spacer"></span>
+      <button id="copy" class="plain">Copy Markdown</button>
+      <button id="download" class="plain">Download .md</button>
+      <button id="new" class="ghost">New question</button>
+    </div>
+    <div class="scores" id="scores"></div>
+    <article id="report"></article>
+  </section>
+</main>
+
+<aside>
+  <section class="panel">
+    <h2>Recent research</h2>
+    <ul class="recent" id="recent"><li class="empty">Nothing yet.</li></ul>
+  </section>
+</aside>
+</div>
+<footer>Rate-limited, with a daily spending cap. No sign-in, so don't submit anything sensitive.</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const show = (id, on = true) => $(id).classList.toggle("hidden", !on);
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+                set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+
+const STEPS = [
+  ["planner", "Plan the research"], ["human_approval", "Your approval"], ["search", "Search the web"],
+  ["ingest", "Read and clean sources"], ["retrieve", "Find relevant passages"], ["extract_claims", "Extract claims"],
+  ["verify", "Verify claims"], ["followup_search", "Follow-up search"], ["writer", "Write the report"],
+  ["evaluate", "Score the report"],
+];
+const STATUS = { queued: "Queued", running: "Researching", awaiting_approval: "Needs your approval",
+                 completed: "Completed", failed: "Failed", rejected: "Plan rejected" };
+
+let jobId = new URLSearchParams(location.search).get("job");
+let timer = null, planFor = null, reportFor = null, reportMd = "", plan = null, lastStatus = null;
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: { "content-type": "application/json" }, ...opts });
+  const isJson = r.headers.get("content-type")?.includes("json");
+  const body = isJson ? await r.json() : await r.text();
+  if (!r.ok) {
+    const d = body && body.detail;
+    throw new Error(typeof d === "string" ? d : Array.isArray(d) ? d.map((x) => x.msg).join("; ") : r.statusText);
+  }
+  return body;
+}
+
+// ---------------------------------------------------------------- ask
+async function loadModels() {
+  try {
+    const models = await api("/models");
+    const saved = store.get("model");
+    $("model").replaceChildren(...models.map((m) => el("option", { value: m.id, textContent: m.label })));
+    $("model").value = models.some((m) => m.id === saved) ? saved : (models.find((m) => m.default) || models[0]).id;
+    if (!models.length) throw new Error("No AI model is configured on the server. Add an API key to .env.");
+  } catch (e) { showError("submit-error", e.message); $("submit").disabled = true; }
+}
+$("model").onchange = () => store.set("model", $("model").value);
+$("question").oninput = () => { $("count").textContent = $("question").value.length; };
+$("question").onkeydown = (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("submit").click(); };
+
+$("submit").onclick = async () => {
+  show("submit-error", false);
+  const question = $("question").value.trim();
+  if (question.length < 10) return showError("submit-error", "Please write a question of at least 10 characters.");
+  $("submit").disabled = true;
+  try {
+    const r = await api("/research", { method: "POST",
+      body: JSON.stringify({ question, model: $("model").value, auto_approve: $("auto").checked }) });
+    openJob(r.job_id);
+  } catch (e) { showError("submit-error", e.message); }
+  $("submit").disabled = false;
+};
+
+function showError(id, msg) { $(id).textContent = msg; show(id, !!msg); }
+
+function openJob(id) {
+  jobId = id;
+  history.replaceState(null, "", id ? `?job=${id}` : location.pathname);
+  planFor = reportFor = null;
+  ["plan", "result"].forEach((s) => show(s, false));
+  poll();
+  loadRecent();
+}
+
+// ---------------------------------------------------------------- progress
+function renderSteps(job) {
+  const done = new Set(job.timeline.filter((e) => e.success).map((e) => e.node));
+  const failed = new Set(job.timeline.filter((e) => !e.success).map((e) => e.node));
+  const time = {};
+  job.timeline.forEach((e) => { if (e.success) time[e.node] = (time[e.node] || 0) + e.duration_ms; });
+  const last = job.timeline.at(-1)?.node;
+  let active = null;
+  if (["queued", "running"].includes(job.status)) {
+    active = last === "followup_search" ? "verify"
+      : STEPS.map(([k]) => k).find((k) => k !== "followup_search" && !done.has(k));
+  }
+  // The follow-up search only runs when some claims lacked corroboration.
+  const visible = STEPS.filter(([k]) => k !== "followup_search" || done.has(k) || failed.has(k));
+  $("steps").replaceChildren(...visible
+    .map(([k, label]) => {
+      let cls = "", mark = "";
+      if (job.status === "awaiting_approval" && k === "human_approval") cls = "waiting";
+      else if (k === active) cls = "active";  // incl. verify's second pass after a follow-up
+      else if (done.has(k)) { cls = "done"; mark = "✓"; }
+      else if (failed.has(k) && job.status === "failed") { cls = "failed"; mark = "!"; }
+      const t = time[k] ? `${(time[k] / 1000).toFixed(time[k] < 10000 ? 1 : 0)}s` : "";
+      return el("li", { className: cls }, el("span", { className: "dot", textContent: mark }), label,
+                el("span", { className: "t", textContent: t }));
+    }));
+}
+
+async function poll() {
+  clearTimeout(timer);
+  show("job", !!jobId);
+  if (!jobId) return;
+  let job;
+  try { job = await api(`/research/${jobId}`); }
+  catch (e) { showError("job-error", e.message); return; }
+
+  $("job-q").textContent = job.question;
+  $("job-status").textContent = STATUS[job.status] || job.status;
+  $("job-status").className = `chip ${job.status}`;
+  $("job-meta").textContent = [job.model_label, `$${job.cost_usd.toFixed(4)} spent`,
+    new Date(job.created_at + (job.created_at.endsWith("Z") || job.created_at.includes("+") ? "" : "Z")).toLocaleString()]
+    .filter(Boolean).join(" · ");
+  renderSteps(job);
+  showError("job-error", job.status === "failed" ? `Something went wrong: ${job.error || "unknown error"}` :
+                         job.status === "rejected" ? "You rejected the plan, so no research was done. Rephrase your question and start again." : "");
+  show("retry-row", job.status === "failed");
+
+  if (job.status === "awaiting_approval" && planFor !== jobId) { planFor = jobId; renderPlan(job.plan); }
+  if (job.status !== "awaiting_approval") show("plan", false);
+  if (job.status === "completed" && reportFor !== jobId) { reportFor = jobId; await renderReport(job); }
+  if (job.status !== lastStatus) { lastStatus = job.status; loadRecent(); }
+  if (["queued", "running"].includes(job.status)) timer = setTimeout(poll, 2000);
+}
+
+$("retry").onclick = async () => {
+  try { await api(`/research/${jobId}/resume`, { method: "POST" }); poll(); }
+  catch (e) { showError("job-error", e.message); }
+};
+
+// ---------------------------------------------------------------- approval
+function renderPlan(p) {
+  plan = structuredClone(p);
+  plan.subquestions.forEach((q) => { q.original = q.question; });
+  $("objective").textContent = plan.objective;
+  $("scope").textContent = plan.scope || "—";
+  drawSubqs();
+  show("plan");
+  $("plan").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function drawSubqs() {
+  $("subqs").replaceChildren(...plan.subquestions.map((q, i) => {
+    const input = el("input", { type: "text", value: q.question, placeholder: "Subquestion…" });
+    input.setAttribute("aria-label", `Subquestion ${i + 1}`);
+    const searches = el("small");
+    const describe = () => {
+      searches.textContent = q.question.trim() !== q.original || !q.search_queries?.length
+        ? "Searches: built from your wording" : "Searches: " + q.search_queries.join(" · ");
+    };
+    describe();
+    input.oninput = () => { q.question = input.value; describe(); };
+    const remove = el("button", { className: "plain", textContent: "Remove", title: "Remove this subquestion" });
+    remove.onclick = () => { plan.subquestions.splice(i, 1); drawSubqs(); };
+    remove.disabled = plan.subquestions.length <= 1;
+    return el("div", { className: "subq" }, el("span", { className: "n", textContent: `Q${i + 1}` }),
+              el("div", { className: "body" }, input, searches), remove);
+  }));
+}
+
+$("add-subq").onclick = () => {
+  plan.subquestions.push({ id: "", question: "", search_queries: [], original: "" });
+  drawSubqs();
+  $("subqs").querySelector(".subq:last-child input").focus();
+};
+$("approve").onclick = () => decide(true);
+$("reject").onclick = () => decide(false);
+
+async function decide(approved) {
+  const subquestions = plan.subquestions
+    .map((q) => ({ id: q.id, question: q.question.trim(),
+                   // an edited question gets fresh searches built from its new wording
+                   search_queries: q.question.trim() === q.original ? q.search_queries : [] }))
+    .filter((q) => q.question);
+  if (approved && !subquestions.length) return showError("job-error", "Keep at least one subquestion.");
+  const edited = { objective: plan.objective, scope: plan.scope, outline: subquestions.map((q) => q.question), subquestions };
+  const unchanged = JSON.stringify(subquestions.map((q) => q.question)) === JSON.stringify(plan.subquestions.map((q) => q.original));
+  ["approve", "reject"].forEach((b) => ($(b).disabled = true));
+  try {
+    await api(`/research/${jobId}/approve`, { method: "POST",
+      body: JSON.stringify({ approved, plan: approved && !unchanged ? edited : null }) });
+    show("plan", false);
+    poll();
+  } catch (e) { showError("job-error", e.message); }
+  ["approve", "reject"].forEach((b) => ($(b).disabled = false));
+}
+
+// ---------------------------------------------------------------- report
+function linkCitations(md) {
+  const cut = md.search(/^## (Contested and unverified claims|References)/m);
+  const body = cut < 0 ? md : md.slice(0, cut), tail = cut < 0 ? "" : md.slice(cut);
+  const cite = (ids) => `<sup class="cite">[${ids.split(/\s*,\s*/).map((s) => `<a href="#ref-${s}">${s}</a>`).join(", ")}]</sup>`;
+  return body.replace(/\[(S\d+(?:\s*,\s*S\d+)*)\]/g, (_, ids) => cite(ids))
+       + tail.replace(/^- \[(S\d+)\]/gm, (_, s) => `- <span id="ref-${s}"></span>[${s}]`);
+}
+
+async function renderReport(job) {
+  reportMd = await api(`/research/${jobId}/report`);
+  const ev = job.evaluation || {};
+  const pct = (x) => `${Math.round((x || 0) * 100)}%`;
+  const scores = [
+    [pct(ev.citation_coverage), "sentences cited"],
+    [`${ev.claims_verified ?? 0} of ${ev.claims_total ?? 0}`, "claims verified"],
+    [ev.claims_contradicted ?? 0, "claims contradicted"],
+    [ev.cited_sources ?? 0, `sources cited (${ev.unique_domains ?? 0} sites)`],
+    [pct(ev.hallucination_risk), "unsupported sentences"],
+    [`${Math.round(ev.latency_s || 0)}s · $${job.cost_usd.toFixed(3)}`, "time · cost"],
+  ];
+  $("scores").replaceChildren(...scores.map(([v, k]) =>
+    el("div", { className: "score" }, el("b", { textContent: v }), el("span", { textContent: k }))));
+  $("report").innerHTML = DOMPurify.sanitize(marked.parse(linkCitations(reportMd)));
+  // References open in a new tab; in-page citation links jump to them.
+  $("report").querySelectorAll("a[href^='http']").forEach((a) => { a.target = "_blank"; a.rel = "noopener"; });
+  $("report").querySelectorAll("span[id^='ref-']").forEach((s) => { s.parentElement.id = s.id; s.remove(); });
+  show("result");
+}
+
+$("copy").onclick = async () => {
+  try { await navigator.clipboard.writeText(reportMd); $("copy").textContent = "Copied"; }
+  catch { $("copy").textContent = "Copy failed"; }
+  setTimeout(() => ($("copy").textContent = "Copy Markdown"), 1500);
+};
+$("download").onclick = () => {
+  const name = ($("job-q").textContent.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60) || "report") + ".md";
+  const a = el("a", { href: URL.createObjectURL(new Blob([reportMd], { type: "text/markdown" })), download: name });
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+$("new").onclick = () => {
+  openJob(null);
+  show("job", false);
+  $("question").value = ""; $("count").textContent = "0";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  $("question").focus();
+};
+
+// ---------------------------------------------------------------- recent
+async function loadRecent() {
+  let jobs;
+  try { jobs = await api("/research?limit=15"); } catch { return; }
+  if (!jobs.length) return;
+  $("recent").replaceChildren(...jobs.map((j) => {
+    const a = el("a", { href: `?job=${j.job_id}`, className: j.job_id === jobId ? "current" : "" },
+      el("div", { className: "rq", textContent: j.question }),
+      el("div", { className: "meta" }, el("span", { className: `chip ${j.status}`, textContent: STATUS[j.status] || j.status })));
+    a.onclick = (e) => { e.preventDefault(); openJob(j.job_id); window.scrollTo({ top: 0, behavior: "smooth" }); };
+    return el("li", {}, a);
+  }));
+}
+
+loadModels();
+loadRecent();
+poll();
+</script>
+</body>
+</html>

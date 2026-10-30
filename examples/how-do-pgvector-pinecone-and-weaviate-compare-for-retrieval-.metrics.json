@@ -1,0 +1,113 @@
+{
+  "question": "How do pgvector, Pinecone, and Weaviate compare for retrieval-augmented generation workloads?",
+  "model": "gpt-4.1-mini",
+  "cost_usd": 0.04629,
+  "evaluation": {
+    "citation_coverage": 0.786,
+    "cited_sources": 14,
+    "unique_domains": 14,
+    "source_diversity": 1.0,
+    "invalid_citations": [],
+    "hallucination_risk": 0.0,
+    "unsupported_statements": [],
+    "claims_total": 24,
+    "claims_verified": 19,
+    "claims_uncertain": 3,
+    "claims_contradicted": 2,
+    "injection_flags": 0,
+    "latency_s": 165.64,
+    "cost_usd": 0.04629,
+    "tokens": 145798,
+    "llm_calls": 67
+  },
+  "timeline": [
+    {
+      "node": "planner",
+      "started_at": "2026-10-29 03:10:51.306073",
+      "duration_ms": 4977,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00089
+    },
+    {
+      "node": "human_approval",
+      "started_at": "2026-10-29 03:10:56.303263",
+      "duration_ms": 1,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.0
+    },
+    {
+      "node": "search",
+      "started_at": "2026-10-29 03:10:56.317418",
+      "duration_ms": 24710,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.0
+    },
+    {
+      "node": "ingest",
+      "started_at": "2026-10-29 03:11:21.042461",
+      "duration_ms": 19406,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00131
+    },
+    {
+      "node": "retrieve",
+      "started_at": "2026-10-29 03:11:40.477244",
+      "duration_ms": 12436,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00756
+    },
+    {
+      "node": "extract_claims",
+      "started_at": "2026-10-29 03:11:52.937404",
+      "duration_ms": 12358,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00662
+    },
+    {
+      "node": "verify",
+      "started_at": "2026-10-29 03:12:05.320510",
+      "duration_ms": 47525,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.02086
+    },
+    {
+      "node": "followup_search",
+      "started_at": "2026-10-29 03:12:52.870093",
+      "duration_ms": 15462,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00034
+    },
+    {
+      "node": "verify",
+      "started_at": "2026-10-29 03:13:08.352911",
+      "duration_ms": 18520,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00446
+    },
+    {
+      "node": "writer",
+      "started_at": "2026-10-29 03:13:26.895883",
+      "duration_ms": 8210,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00295
+    },
+    {
+      "node": "evaluate",
+      "started_at": "2026-10-29 03:13:35.123801",
+      "duration_ms": 2032,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00131
+    }
+  ]
+}

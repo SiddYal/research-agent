@@ -1,0 +1,27 @@
+# Direct dependencies. Regenerate the lockfile with:
+#   pip-compile requirements.in -o requirements.txt
+openai>=3.0
+anthropic>=2.0
+langgraph>=1.2
+langgraph-checkpoint-sqlite>=3.1
+langgraph-checkpoint-postgres>=3.2
+fastapi>=0.160
+uvicorn[standard]>=0.50
+sqlalchemy>=2.1
+alembic>=1.20
+psycopg[binary]>=3.3
+psycopg-pool>=3.3
+pgvector>=0.5
+pydantic>=2.13
+pydantic-settings>=2.16
+ddgs>=9.16
+trafilatura>=2.3
+httpx>=0.28
+rank-bm25>=0.2
+tiktoken>=0.14
+numpy>=2.5
+tenacity>=9.2
+structlog>=26.1
+slowapi>=0.1.10
+rich>=14.0
+python-dotenv>=1.1

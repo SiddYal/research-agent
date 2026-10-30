@@ -1,0 +1,118 @@
+{
+  "question": "What is driving the growth in AI data center power demand, and how are operators responding?",
+  "model": "gpt-4.1-mini",
+  "cost_usd": 0.04931,
+  "evaluation": {
+    "citation_coverage": 0.794,
+    "cited_sources": 11,
+    "unique_domains": 10,
+    "source_diversity": 0.909,
+    "invalid_citations": [],
+    "hallucination_risk": 0.118,
+    "unsupported_statements": [
+      "AI data center power demand is growing rapidly due to the increasing complexity and density of AI workloads.",
+      "Technological innovations focus on cooling and power management tailored to AI workloads.",
+      "However, evidence is limited on the long-term scalability of some emerging technologies and the full impact of regulatory policies.",
+      "Future research should monitor the effectiveness of these strategies and the evolving role of grid modernization in supporting sustainable AI data center growth."
+    ],
+    "claims_total": 29,
+    "claims_verified": 24,
+    "claims_uncertain": 5,
+    "claims_contradicted": 0,
+    "injection_flags": 0,
+    "latency_s": 203.25,
+    "cost_usd": 0.04931,
+    "tokens": 134600,
+    "llm_calls": 73
+  },
+  "timeline": [
+    {
+      "node": "planner",
+      "started_at": "2026-10-29 03:16:21.491870",
+      "duration_ms": 3577,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00078
+    },
+    {
+      "node": "human_approval",
+      "started_at": "2026-10-29 03:16:25.090147",
+      "duration_ms": 4,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.0
+    },
+    {
+      "node": "search",
+      "started_at": "2026-10-29 03:16:25.116794",
+      "duration_ms": 38389,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.0
+    },
+    {
+      "node": "ingest",
+      "started_at": "2026-10-29 03:17:03.530148",
+      "duration_ms": 45936,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00132
+    },
+    {
+      "node": "retrieve",
+      "started_at": "2026-10-29 03:17:49.486260",
+      "duration_ms": 15646,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00894
+    },
+    {
+      "node": "extract_claims",
+      "started_at": "2026-10-29 03:18:05.149873",
+      "duration_ms": 14328,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00764
+    },
+    {
+      "node": "verify",
+      "started_at": "2026-10-29 03:18:19.492556",
+      "duration_ms": 51677,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.02365
+    },
+    {
+      "node": "followup_search",
+      "started_at": "2026-10-29 03:19:11.190915",
+      "duration_ms": 14260,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00031
+    },
+    {
+      "node": "verify",
+      "started_at": "2026-10-29 03:19:25.497381",
+      "duration_ms": 10254,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00274
+    },
+    {
+      "node": "writer",
+      "started_at": "2026-10-29 03:19:35.771637",
+      "duration_ms": 6844,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.0026
+    },
+    {
+      "node": "evaluate",
+      "started_at": "2026-10-29 03:19:42.633996",
+      "duration_ms": 2335,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00133
+    }
+  ]
+}

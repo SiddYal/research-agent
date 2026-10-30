@@ -1,0 +1,113 @@
+{
+  "question": "How do LangGraph, CrewAI, and AutoGen differ as frameworks for building LLM agents?",
+  "model": "gpt-4.1-mini",
+  "cost_usd": 0.03966,
+  "evaluation": {
+    "citation_coverage": 0.727,
+    "cited_sources": 16,
+    "unique_domains": 15,
+    "source_diversity": 0.938,
+    "invalid_citations": [],
+    "hallucination_risk": 0.0,
+    "unsupported_statements": [],
+    "claims_total": 24,
+    "claims_verified": 21,
+    "claims_uncertain": 1,
+    "claims_contradicted": 2,
+    "injection_flags": 0,
+    "latency_s": 163.76,
+    "cost_usd": 0.03966,
+    "tokens": 131952,
+    "llm_calls": 64
+  },
+  "timeline": [
+    {
+      "node": "planner",
+      "started_at": "2026-10-29 03:13:37.328159",
+      "duration_ms": 2791,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.0007
+    },
+    {
+      "node": "human_approval",
+      "started_at": "2026-10-29 03:13:40.140154",
+      "duration_ms": 5,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.0
+    },
+    {
+      "node": "search",
+      "started_at": "2026-10-29 03:13:40.165161",
+      "duration_ms": 28033,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.0
+    },
+    {
+      "node": "ingest",
+      "started_at": "2026-10-29 03:14:08.218314",
+      "duration_ms": 31029,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00209
+    },
+    {
+      "node": "retrieve",
+      "started_at": "2026-10-29 03:14:39.262685",
+      "duration_ms": 14180,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00659
+    },
+    {
+      "node": "extract_claims",
+      "started_at": "2026-10-29 03:14:53.460801",
+      "duration_ms": 11858,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00509
+    },
+    {
+      "node": "verify",
+      "started_at": "2026-10-29 03:15:05.333653",
+      "duration_ms": 44116,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.0178
+    },
+    {
+      "node": "followup_search",
+      "started_at": "2026-10-29 03:15:49.468050",
+      "duration_ms": 13186,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00122
+    },
+    {
+      "node": "verify",
+      "started_at": "2026-10-29 03:16:02.676193",
+      "duration_ms": 6747,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00132
+    },
+    {
+      "node": "writer",
+      "started_at": "2026-10-29 03:16:09.446291",
+      "duration_ms": 9188,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00328
+    },
+    {
+      "node": "evaluate",
+      "started_at": "2026-10-29 03:16:18.659197",
+      "duration_ms": 2636,
+      "success": true,
+      "error": null,
+      "cost_usd": 0.00157
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	planner(planner)
+	human_approval(human_approval)
+	search(search)
+	ingest(ingest)
+	retrieve(retrieve)
+	extract_claims(extract_claims)
+	verify(verify)
+	followup_search(followup_search)
+	writer(writer)
+	evaluate(evaluate)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> planner;
+	extract_claims --> verify;
+	followup_search --> verify;
+	human_approval -.-> __end__;
+	human_approval -.-> search;
+	ingest --> retrieve;
+	planner --> human_approval;
+	retrieve --> extract_claims;
+	search --> ingest;
+	verify -.-> followup_search;
+	verify -.-> writer;
+	writer --> evaluate;
+	evaluate --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

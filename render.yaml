@@ -1,0 +1,21 @@
+# Render blueprint: one Docker web service. Point DATABASE_URL at a Neon
+# Postgres database (pgvector is available on Neon; the migration enables it).
+services:
+  - type: web
+    name: research-agent
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DAILY_COST_CAP_USD
+        value: "2.00"
+      - key: MAX_JOB_COST_USD
+        value: "0.50"
+      - key: RATE_LIMIT
+        value: "5/minute"
+      - key: LOG_JSON
+        value: "true"

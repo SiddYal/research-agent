@@ -1,0 +1,13 @@
+.env
+.venv/
+venv/
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+*.db
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+.claude/settings.local.json

@@ -1,0 +1,9 @@
+[project]
+name = "research-agent"
+version = "1.0.0"
+description = "Autonomous research agent: question in, verified and cited report out."
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning:slowapi.*"]
