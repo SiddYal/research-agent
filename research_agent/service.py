@@ -17,7 +17,7 @@ from pathlib import Path
 
 import structlog
 from langgraph.types import Command
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from research_agent.config import Settings, get_settings
 from research_agent.db import ResearchJob, TimelineRecord, session_scope
@@ -136,17 +136,16 @@ class ResearchService:
                 self._running.discard(job_id)
 
     def approve(self, job_id: str, approved: bool = True, plan: dict | None = None, background: bool = True):
-        job = self.get_job_row(job_id)
-        if job.status != "awaiting_approval":
-            raise InvalidJobState(f"job is {job.status}, not awaiting approval")
+        if not self._claim(job_id, ("awaiting_approval",)):
+            raise InvalidJobState(f"job is {self.get_job_row(job_id).status}, not awaiting approval")
         decision = {"approved": approved, "plan": plan}
         return self.submit(job_id, decision) if background else self.run(job_id, decision)
 
     def resume(self, job_id: str, background: bool = True):
         """Retries a failed job from its last checkpoint (completed nodes are not re-run)."""
-        job = self.get_job_row(job_id)
-        if job.status not in ("failed", "queued", "running"):
-            raise InvalidJobState(f"job is {job.status}; only failed or interrupted jobs can be resumed")
+        if not self._claim(job_id, ("failed", "queued", "running")):
+            raise InvalidJobState(f"job is {self.get_job_row(job_id).status}; "
+                                  "only failed or interrupted jobs can be resumed")
         return self.submit(job_id) if background else self.run(job_id)
 
     def recover_inflight(self) -> list[str]:
@@ -327,6 +326,19 @@ class ResearchService:
             job = s.get(ResearchJob, job_id)
             for k, v in fields.items():
                 setattr(job, k, v)
+
+    def _claim(self, job_id: str, from_statuses: tuple[str, ...]) -> bool:
+        """Marks a job running before the worker picks it up, so a client polling right after
+        approve/resume sees "running" rather than the old status. Atomic: of two concurrent
+        approvals, only one wins."""
+        self.get_job_row(job_id)  # JobNotFound for unknown ids
+        with session_scope() as s:
+            claimed = s.execute(
+                update(ResearchJob)
+                .where(ResearchJob.id == job_id, ResearchJob.status.in_(from_statuses))
+                .values(status="running", error=None)
+            ).rowcount
+        return claimed == 1
 
     def _record_event(self, job_id: str, event: TimelineEvent) -> None:
         with session_scope() as s:

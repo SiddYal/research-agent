@@ -11,7 +11,7 @@ from research_agent.graph import make_checkpointer
 from research_agent.llm import HashingEmbedder
 from research_agent.nodes import Deps
 from research_agent.nodes import verify as verify_mod
-from research_agent.service import ResearchService
+from research_agent.service import InvalidJobState, ResearchService
 from tests.fakes import FALSE_FACT, FakeFetcher, FakeLLM, FakeSearch
 
 
@@ -51,6 +51,27 @@ def test_rejected_plan_stops(svc):
     svc.run(job_id)
     assert svc.approve(job_id, approved=False, background=False) == "rejected"
     assert "search" not in nodes_run(svc, job_id)
+
+
+def test_approve_and_retry_mark_the_job_running_before_returning(svc, sql_deps, monkeypatch):
+    """The web UI polls right after approve/retry and stops polling unless it sees "running";
+    with a remote database the worker used to set that status too late."""
+    submitted = []
+    monkeypatch.setattr(svc, "submit", lambda job_id, resume=None: submitted.append(job_id))
+
+    job_id = svc.create_job("What are the key facts about the Eiffel Tower?")
+    assert svc.run(job_id) == "awaiting_approval"
+    svc.approve(job_id)
+    assert svc.get_job(job_id)["status"] == "running" and submitted == [job_id]
+    with pytest.raises(InvalidJobState):  # a double click doesn't start the job twice
+        svc.approve(job_id)
+
+    failed = svc.create_job("What are the key facts about the Eiffel Tower?", auto_approve=True)
+    sql_deps.llm.fail_on = verify_mod._Verdicts
+    assert svc.run(failed) == "failed"
+    svc.resume(failed)
+    job = svc.get_job(failed)
+    assert job["status"] == "running" and job["error"] is None and submitted[-1] == failed
 
 
 def test_failed_node_resumes_without_rerunning_earlier_nodes(svc, sql_deps):
