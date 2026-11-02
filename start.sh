@@ -19,5 +19,6 @@ fi
 
 URL="http://localhost:$PORT"
 echo "Starting the Research Agent at $URL (Ctrl+C to stop)"
-( sleep 4; (command -v open >/dev/null && open "$URL") || (command -v xdg-open >/dev/null && xdg-open "$URL") || true ) &
+echo "Your browser opens once it's ready, usually in 10-30 seconds."
+.venv/bin/python scripts/open_when_ready.py "$URL" &
 exec .venv/bin/python -m uvicorn research_agent.api.main:app --port "$PORT"

@@ -20,6 +20,7 @@ if not exist ".env" (
 )
 
 echo Starting the Research Agent at http://localhost:%PORT%  (close this window to stop it)
-start "" /b cmd /c "timeout /t 4 /nobreak >nul & start http://localhost:%PORT%"
+echo Your browser opens once it's ready, usually in 10-30 seconds.
+start "" /b ".venv\Scripts\python.exe" scripts\open_when_ready.py http://localhost:%PORT%
 ".venv\Scripts\python.exe" -m uvicorn research_agent.api.main:app --port %PORT%
 pause
