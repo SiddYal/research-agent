@@ -62,9 +62,9 @@ def is_duplicate(text: str, seen: list[set[str]], threshold: float = 0.8) -> boo
 @traced("extract_claims")
 def extract_node(state: ResearchState, deps: Deps) -> dict:
     chunk_map = state.chunk_map()
-    claims: list[Claim] = []
-    seen: list[set[str]] = []
-    for sq in state.plan.subquestions:
+    claims: list[Claim] = list(state.extracted_claims)  # a follow-up adds to the earlier ones
+    seen: list[set[str]] = [_terms(c.text) for c in claims]
+    for sq in state.active_subquestions():
         chunks = [chunk_map[cid] for cid in state.retrieved.get(sq.id, []) if cid in chunk_map]
         if not chunks:
             continue
@@ -184,10 +184,12 @@ def gather_evidence(claim: Claim, retriever, chunk_map: dict[str, Chunk], k: int
 @traced("verify")
 def verify_node(state: ResearchState, deps: Deps) -> dict:
     if state.verification_round == 0:
-        todo: list[Claim] = list(state.extracted_claims)
-        done: dict[str, VerifiedClaim] = {}
+        # Claims verified in an earlier pass (before a reader's follow-up) keep their verdicts.
+        done: dict[str, VerifiedClaim] = {c.id: c for c in state.verified_claims}
+        todo: list[Claim] = [c for c in state.extracted_claims if c.id not in done]
     else:  # re-check only what follow-up retrieval was meant to resolve
-        done = {c.id: c for c in state.verified_claims if c.status != "uncertain" or c.contradicting_sources}
+        unresolved = {c.id for c in _unresolved(state)}
+        done = {c.id: c for c in state.verified_claims if c.id not in unresolved}
         todo = [Claim(**c.model_dump(include=set(Claim.model_fields)))
                 for c in state.verified_claims if c.id not in done]
 
@@ -237,9 +239,15 @@ def verify_node(state: ResearchState, deps: Deps) -> dict:
     return {"verified_claims": ordered}
 
 
+def _unresolved(state: ResearchState) -> list[VerifiedClaim]:
+    """Uncorroborated claims from the current pass (earlier passes' verdicts are final)."""
+    active = {sq.id for sq in state.active_subquestions()}
+    return [c for c in state.verified_claims
+            if c.status == "uncertain" and not c.contradicting_sources and c.subquestion_id in active]
+
+
 def needs_followup(state: ResearchState, max_rounds: int) -> bool:
-    unresolved = [c for c in state.verified_claims if c.status == "uncertain" and not c.contradicting_sources]
-    return bool(unresolved) and state.verification_round < max_rounds
+    return bool(_unresolved(state)) and state.verification_round < max_rounds
 
 
 def keyword_query(claim: Claim, max_terms: int = 9) -> str:
@@ -257,10 +265,7 @@ def keyword_query(claim: Claim, max_terms: int = 9) -> str:
 @traced("followup_search")
 def followup_node(state: ResearchState, deps: Deps) -> dict:
     """Targeted search for the weakest uncertain claims, to find corroborating sources."""
-    unresolved = sorted(
-        (c for c in state.verified_claims if c.status == "uncertain" and not c.contradicting_sources),
-        key=lambda c: c.final_confidence,
-    )[:4]
+    unresolved = sorted(_unresolved(state), key=lambda c: c.final_confidence)[:4]
     errors = list(state.errors)
     queries = [(c.subquestion_id, keyword_query(c)) for c in unresolved]
     new = collect_sources(deps, queries, state.sources, limit=6, per_query=3, errors=errors)

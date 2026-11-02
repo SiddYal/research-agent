@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     max_verification_rounds: int = 1
     llm_sanitizer: bool = True
 
+    # Follow-up questions on a finished report (each researches a smaller slice)
+    followup_max_subquestions: int = 3
+    followup_max_sources: int = 8
+
     # Storage. On Neon, DATABASE_URL is the pooled endpoint for app queries and
     # DATABASE_URL_UNPOOLED the direct one for migrations and the checkpointer.
     database_url: str = "sqlite:///./data/research.db"

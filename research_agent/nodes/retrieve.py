@@ -13,8 +13,8 @@ def make_retriever(state: ResearchState, deps: Deps) -> HybridRetriever:
 def retrieve_node(state: ResearchState, deps: Deps) -> dict:
     s = deps.settings
     retriever = make_retriever(state, deps)
-    retrieved: dict[str, list[str]] = {}
-    for sq in state.plan.subquestions:
+    retrieved = dict(state.retrieved)
+    for sq in state.active_subquestions():
         query = " ".join([sq.question] + sq.search_queries[:1])
         candidates = retriever.search(query, s.retrieval_candidates)
         if s.reranker == "llm":

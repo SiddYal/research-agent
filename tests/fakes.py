@@ -9,8 +9,10 @@ from __future__ import annotations
 import re
 from typing import Callable
 
+from research_agent.nodes import followups as followups_mod
 from research_agent.nodes import planner as planner_mod
 from research_agent.nodes import verify as verify_mod
+from research_agent.nodes import writer as writer_mod
 from research_agent.tools import retrieval as retrieval_mod
 from research_agent import evaluation as evaluation_mod
 from research_agent.tools import sanitize as sanitize_mod
@@ -51,6 +53,17 @@ PAGES = {
 }
 
 
+# Only found by follow-up searches about visitors, so a follow-up has something new to add.
+VISITOR_PAGES = {
+    "https://monuments.example.org/eiffel-visitors": (
+        "Eiffel Tower visitor numbers",
+        "# Visitors\n\nThe Eiffel Tower receives around 7 million visitors every year, making it one "
+        "of the most visited monuments in the world.",
+        "2025-06-01",
+    ),
+}
+
+
 class FakeSearch:
     def __init__(self, fail_queries: set[str] | None = None):
         self.calls: list[str] = []
@@ -60,14 +73,16 @@ class FakeSearch:
         self.calls.append(query)
         if query in self.fail_queries:
             raise RuntimeError("search backend down")
-        return [SearchResult(title, url, text[:150]) for url, (title, text, _) in PAGES.items()][:max_results]
+        pages = PAGES | (VISITOR_PAGES if "visit" in query else {})
+        return [SearchResult(title, url, text[:150]) for url, (title, text, _) in pages.items()][:max_results]
 
 
 class FakeFetcher:
     def fetch(self, url: str) -> FetchedPage | None:
-        if url not in PAGES:
+        pages = PAGES | VISITOR_PAGES
+        if url not in pages:
             return None
-        title, text, published = PAGES[url]
+        title, text, published = pages[url]
         return FetchedPage(url=url, text=text, title=title, published=published)
 
 
@@ -112,6 +127,15 @@ class FakeLLM:
                                       search_queries=["eiffel tower construction history"]),
                 ],
             )
+        if schema is followups_mod._FollowUpPlanOut:
+            return schema(subquestions=[planner_mod._SubQ(question="How many people visit the Eiffel Tower?",
+                                                          search_queries=["eiffel tower visitors per year"])])
+        if schema is writer_mod._Revision:
+            claims = re.findall(r"- \(Q\d+\) (.*?) \[sources: ([^\]]+)\]", user)
+            content = " ".join(f"{text.rstrip('.')} [{srcs}]." for text, srcs in claims)
+            return schema(edits=[writer_mod._Edit(action="insert", section="Executive summary",
+                                                  heading="Visitors", content=content)],
+                          summary="Added a Visitors section.")
         if schema is sanitize_mod._Verdicts:
             return schema(verdicts=[sanitize_mod._Verdict(index=int(i), is_injection=True)
                                     for i in _ids(r"\[(\d+)\]", user)])

@@ -4,6 +4,10 @@
             -> verify -(unresolved claims, rounds left)-> followup_search -> verify
                       -(otherwise)-> writer -> evaluate -> END
 
+A reader's follow-up question re-runs the same thread from START on the finished state:
+
+    followup_planner -> followup_approval -(approved)-> search -> ... -> writer (edits the report)
+
 State is checkpointed after every node under thread_id = job id, so a job can be
 paused at approval, inspected, and resumed, and a failed node can be retried
 without re-running the nodes before it.
@@ -26,7 +30,9 @@ from research_agent.nodes import (
     approval_node,
     evaluate_node,
     extract_node,
+    followup_approval_node,
     followup_node,
+    followup_planner_node,
     ingest_node,
     planner_node,
     retrieve_node,
@@ -64,12 +70,18 @@ def build_graph(deps: Deps, checkpointer: BaseCheckpointSaver | None = None):
         "followup_search": followup_node,
         "writer": writer_node,
         "evaluate": evaluate_node,
+        "followup_planner": followup_planner_node,
+        "followup_approval": followup_approval_node,
     }
     for name, fn in nodes.items():
         g.add_node(name, (lambda f: lambda state: f(state, deps))(fn),
-                   retry_policy=None if name == "human_approval" else RETRY)
+                   retry_policy=None if name in ("human_approval", "followup_approval") else RETRY)
 
-    g.add_edge(START, "planner")
+    g.add_conditional_edges(START, lambda s: "followup_planner" if s.pending_followup() else "planner",
+                            ["planner", "followup_planner"])
+    g.add_edge("followup_planner", "followup_approval")
+    g.add_conditional_edges("followup_approval",
+                            lambda s: "search" if s.pending_followup() else END, ["search", END])
     g.add_edge("planner", "human_approval")
     g.add_conditional_edges("human_approval", lambda s: "search" if s.approved else END, ["search", END])
     g.add_edge("search", "ingest")

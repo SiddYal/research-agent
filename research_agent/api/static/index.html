@@ -99,6 +99,17 @@
   article li:target { background: var(--warn-soft); border-radius: 4px; }
   article code { background: var(--soft); padding: 1px 5px; border-radius: 4px; }
 
+  article .updated { font-size: .72rem; font-weight: 600; vertical-align: middle; margin-left: 8px; border-radius: 999px;
+                     padding: 2px 8px; background: var(--ok-soft); color: var(--ok); }
+  .version-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 16px; }
+  .version-bar select { width: auto; padding: 5px 10px; }
+  .fu-list { list-style: none; margin: 16px 0 0; padding: 0; }
+  .fu-list li { border-top: 1px solid var(--line); padding: 12px 0; }
+  .fu-list .fq { font-weight: 600; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .fu-list .fq span:first-child { flex: 1 1 260px; }
+  .fu-list p { margin: 4px 0 0; font-size: .92rem; }
+  .fu-list button { padding: 4px 10px; font-size: .85rem; margin-top: 6px; }
+
   aside h2 { font-size: .95rem; margin: 0 0 10px; }
   .recent { list-style: none; margin: 0; padding: 0; }
   .recent li { border-top: 1px solid var(--line); }
@@ -142,6 +153,7 @@
   <section class="panel hidden" id="job">
     <div class="jobhead"><span class="q" id="job-q"></span><span class="chip" id="job-status"></span></div>
     <div class="meta" id="job-meta"></div>
+    <div class="meta hidden" id="job-pass"></div>
     <ol class="steps" id="steps"></ol>
     <div id="job-error" class="error hidden"></div>
     <div class="row hidden" id="retry-row"><button id="retry" class="ghost">Retry from where it stopped</button></div>
@@ -149,10 +161,10 @@
 
   <!-- 3. Approval -->
   <section class="panel hidden" id="plan">
-    <h2>Review the research plan</h2>
+    <h2 id="plan-title">Review the research plan</h2>
     <p class="hint" style="margin:0">Edit, remove, or add subquestions, then approve. Nothing is searched until you do.</p>
-    <div class="plan-k">Objective</div><div id="objective"></div>
-    <div class="plan-k">Scope</div><div id="scope"></div>
+    <div class="plan-k" id="objective-k">Objective</div><div id="objective"></div>
+    <div id="scope-row"><div class="plan-k">Scope</div><div id="scope"></div></div>
     <div class="plan-k">Subquestions</div>
     <div id="subqs"></div>
     <button id="add-subq" class="plain">+ Add subquestion</button>
@@ -172,8 +184,29 @@
       <button id="download" class="plain">Download .md</button>
       <button id="new" class="ghost">New question</button>
     </div>
+    <div class="version-bar hidden" id="version-bar">
+      <label class="field" for="version" style="margin:0">Version</label>
+      <select id="version"></select>
+      <span class="hint" id="version-note" style="margin:0"></span>
+    </div>
     <div class="scores" id="scores"></div>
     <article id="report"></article>
+  </section>
+
+  <!-- 5. Follow-ups -->
+  <section class="panel hidden" id="followups">
+    <h2>Ask a follow-up</h2>
+    <p class="hint" style="margin:0 0 10px">Ask a clarifying question, or for more on a related topic. The agent
+      researches and verifies it, then edits the report above. Earlier versions are kept.</p>
+    <textarea id="fu-question" maxlength="500" style="min-height:72px"
+      placeholder="e.g. How do these options compare on cost for a small team?"></textarea>
+    <div class="row">
+      <span class="hint" style="margin:0"><span id="fu-count">0</span>/500</span>
+      <span class="spacer"></span>
+      <button id="fu-submit">Research and update the report</button>
+    </div>
+    <div id="fu-error" class="error hidden"></div>
+    <ul class="fu-list" id="fu-list"></ul>
   </section>
 </main>
 
@@ -201,11 +234,17 @@ const STEPS = [
   ["verify", "Verify claims"], ["followup_search", "Follow-up search"], ["writer", "Write the report"],
   ["evaluate", "Score the report"],
 ];
+// A follow-up pass: same research steps, but it plans only the follow-up and edits the report.
+const FOLLOWUP_STEPS = [["followup_planner", "Plan the follow-up"], ["followup_approval", "Your approval"],
+  ...STEPS.slice(2).map(([k, label]) => [k, k === "writer" ? "Update the report" : label])];
+const FU_STATUS = { planning: "Planning", awaiting_approval: "Needs your approval", running: "Researching",
+                    completed: "Done", rejected: "Rejected" };
+const toDate = (s) => new Date(s + (s.endsWith("Z") || /[+-]\d\d:\d\d$/.test(s) ? "" : "Z"));
 const STATUS = { queued: "Queued", running: "Researching", awaiting_approval: "Needs your approval",
                  completed: "Completed", failed: "Failed", rejected: "Plan rejected" };
 
 let jobId = new URLSearchParams(location.search).get("job");
-let timer = null, planFor = null, reportFor = null, reportMd = "", plan = null, lastStatus = null;
+let timer = null, planFor = null, reportFor = null, reportMd = "", plan = null, lastStatus = null, lastJob = null;
 
 async function api(path, opts = {}) {
   const r = await fetch(path, { headers: { "content-type": "application/json" }, ...opts });
@@ -251,29 +290,39 @@ function openJob(id) {
   jobId = id;
   history.replaceState(null, "", id ? `?job=${id}` : location.pathname);
   planFor = reportFor = null;
-  ["plan", "result"].forEach((s) => show(s, false));
+  ["plan", "result", "followups"].forEach((s) => show(s, false));
   poll();
   loadRecent();
 }
 
 // ---------------------------------------------------------------- progress
 function renderSteps(job) {
-  const done = new Set(job.timeline.filter((e) => e.success).map((e) => e.node));
-  const failed = new Set(job.timeline.filter((e) => !e.success).map((e) => e.node));
+  // After a follow-up, show that pass: only the steps run since it was asked.
+  const fu = job.followups?.at(-1);
+  const steps = fu ? FOLLOWUP_STEPS : STEPS;
+  const timeline = fu ? job.timeline.filter((e) => toDate(e.started_at) >= toDate(fu.asked_at)) : job.timeline;
+  const approval = fu ? "followup_approval" : "human_approval";
+  $("job-pass").textContent = fu ? `Follow-up: ${fu.question}` : "";
+  show("job-pass", !!fu);
+
+  const done = new Set(timeline.filter((e) => e.success).map((e) => e.node));
+  const failed = new Set(timeline.filter((e) => !e.success).map((e) => e.node));
   const time = {};
-  job.timeline.forEach((e) => { if (e.success) time[e.node] = (time[e.node] || 0) + e.duration_ms; });
-  const last = job.timeline.at(-1)?.node;
+  timeline.forEach((e) => { if (e.success) time[e.node] = (time[e.node] || 0) + e.duration_ms; });
+  const last = timeline.at(-1)?.node;
   let active = null;
   if (["queued", "running"].includes(job.status)) {
     active = last === "followup_search" ? "verify"
-      : STEPS.map(([k]) => k).find((k) => k !== "followup_search" && !done.has(k));
+      : steps.map(([k]) => k).find((k) => k !== "followup_search" && !done.has(k));
   }
-  // The follow-up search only runs when some claims lacked corroboration.
-  const visible = STEPS.filter(([k]) => k !== "followup_search" || done.has(k) || failed.has(k));
+  // The follow-up search only runs when some claims lacked corroboration;
+  // a rejected follow-up stops at the approval.
+  const stopped = fu?.status === "rejected";
+  const visible = steps.filter(([k], i) => (k !== "followup_search" || done.has(k) || failed.has(k)) && (!stopped || i < 2));
   $("steps").replaceChildren(...visible
     .map(([k, label]) => {
       let cls = "", mark = "";
-      if (job.status === "awaiting_approval" && k === "human_approval") cls = "waiting";
+      if (job.status === "awaiting_approval" && k === approval) cls = "waiting";
       else if (k === active) cls = "active";  // incl. verify's second pass after a follow-up
       else if (done.has(k)) { cls = "done"; mark = "✓"; }
       else if (failed.has(k) && job.status === "failed") { cls = "failed"; mark = "!"; }
@@ -302,9 +351,18 @@ async function poll() {
                          job.status === "rejected" ? "You rejected the plan, so no research was done. Rephrase your question and start again." : "");
   show("retry-row", job.status === "failed");
 
-  if (job.status === "awaiting_approval" && planFor !== jobId) { planFor = jobId; renderPlan(job.plan); }
+  lastJob = job;
+  const fu = job.followups?.at(-1);
+  const planKey = `${jobId}:${job.followups?.length || 0}`;
+  if (job.status === "awaiting_approval" && planFor !== planKey) {
+    planFor = planKey;
+    if (fu?.status === "awaiting_approval") renderPlan({ objective: fu.question, subquestions: fu.subquestions }, true);
+    else renderPlan(job.plan);
+  }
   if (job.status !== "awaiting_approval") show("plan", false);
-  if (job.status === "completed" && reportFor !== jobId) { reportFor = jobId; await renderReport(job); }
+  // The report stays readable while a follow-up updates it.
+  if (job.has_report && reportFor !== `${jobId}:${job.version}`) { reportFor = `${jobId}:${job.version}`; await renderReport(job); }
+  if (job.has_report) renderFollowups(job);
   if (job.status !== lastStatus) { lastStatus = job.status; loadRecent(); }
   if (["queued", "running"].includes(job.status)) timer = setTimeout(poll, 2000);
 }
@@ -315,11 +373,15 @@ $("retry").onclick = async () => {
 };
 
 // ---------------------------------------------------------------- approval
-function renderPlan(p) {
+function renderPlan(p, followup = false) {
   plan = structuredClone(p);
   plan.subquestions.forEach((q) => { q.original = q.question; });
+  plan.originals = plan.subquestions.map((q) => q.question);  // to tell whether anything was edited or removed
+  $("plan-title").textContent = followup ? "Review the follow-up research" : "Review the research plan";
+  $("objective-k").textContent = followup ? "Your follow-up" : "Objective";
   $("objective").textContent = plan.objective;
   $("scope").textContent = plan.scope || "—";
+  show("scope-row", !followup);
   drawSubqs();
   show("plan");
   $("plan").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -360,7 +422,7 @@ async function decide(approved) {
     .filter((q) => q.question);
   if (approved && !subquestions.length) return showError("job-error", "Keep at least one subquestion.");
   const edited = { objective: plan.objective, scope: plan.scope, outline: subquestions.map((q) => q.question), subquestions };
-  const unchanged = JSON.stringify(subquestions.map((q) => q.question)) === JSON.stringify(plan.subquestions.map((q) => q.original));
+  const unchanged = JSON.stringify(subquestions.map((q) => q.question)) === JSON.stringify(plan.originals);
   ["approve", "reject"].forEach((b) => ($(b).disabled = true));
   try {
     await api(`/research/${jobId}/approve`, { method: "POST",
@@ -381,7 +443,23 @@ function linkCitations(md) {
 }
 
 async function renderReport(job) {
-  reportMd = await api(`/research/${jobId}/report`);
+  const versions = Array.from({ length: job.version }, (_, i) => i + 1).reverse();
+  $("version").replaceChildren(...versions.map((v) => el("option", { value: v,
+    textContent: v === job.version ? `${v} (current)` : v === 1 ? "1 (original)" : `${v}` })));
+  $("version").value = job.version;
+  show("version-bar", job.version > 1);
+  await showVersion(job, job.version);
+  show("result");
+}
+
+$("version").onchange = () => showVersion(lastJob, Number($("version").value));
+
+async function showVersion(job, v) {
+  const current = v === job.version;
+  reportMd = await api(`/research/${jobId}/report${current ? "" : `?version=${v}`}`);
+  $("version").value = v;
+  $("version-note").textContent = current ? "" : "An earlier version. The scores are for the current one.";
+  show("scores", current);
   const ev = job.evaluation || {};
   const pct = (x) => `${Math.round((x || 0) * 100)}%`;
   const scores = [
@@ -398,8 +476,48 @@ async function renderReport(job) {
   // References open in a new tab; in-page citation links jump to them.
   $("report").querySelectorAll("a[href^='http']").forEach((a) => { a.target = "_blank"; a.rel = "noopener"; });
   $("report").querySelectorAll("span[id^='ref-']").forEach((s) => { s.parentElement.id = s.id; s.remove(); });
-  show("result");
+  // Mark the sections the latest follow-up changed.
+  const fu = current && job.followups?.findLast((f) => f.version === job.version);
+  if (fu) $("report").querySelectorAll("h2").forEach((h) => {
+    if (fu.changed_sections.includes(h.textContent.trim())) h.append(el("span", { className: "updated", textContent: "Updated" }));
+  });
 }
+
+// ---------------------------------------------------------------- follow-ups
+function renderFollowups(job) {
+  const busy = job.status !== "completed";
+  $("fu-submit").disabled = busy;
+  $("fu-submit").textContent = busy && job.status !== "failed" ? "Updating the report…" : "Research and update the report";
+  $("fu-list").replaceChildren(...[...(job.followups || [])].reverse().map((f) => {
+    const failed = job.status === "failed" && !["completed", "rejected"].includes(f.status);
+    const chip = failed ? "failed" : { completed: "completed", rejected: "rejected", awaiting_approval: "awaiting_approval" }[f.status] || "running";
+    const item = el("li", {}, el("div", { className: "fq" }, el("span", { textContent: f.question }),
+      el("span", { className: `chip ${chip}`, textContent: failed ? "Failed" : FU_STATUS[f.status] })));
+    if (f.summary) item.append(el("p", { textContent: f.summary }));
+    if (f.changed_sections?.length) item.append(el("p", { className: "hint", textContent: `Changed: ${f.changed_sections.join(", ")}` }));
+    if (f.version) {
+      const before = el("button", { className: "plain", textContent: `View the report before this (version ${f.version - 1})` });
+      before.onclick = () => { showVersion(lastJob, f.version - 1); $("result").scrollIntoView({ behavior: "smooth" }); };
+      item.append(before);
+    }
+    return item;
+  }));
+  show("followups");
+}
+
+$("fu-question").oninput = () => { $("fu-count").textContent = $("fu-question").value.length; };
+$("fu-submit").onclick = async () => {
+  show("fu-error", false);
+  const question = $("fu-question").value.trim();
+  if (question.length < 10) return showError("fu-error", "Please write a question of at least 10 characters.");
+  $("fu-submit").disabled = true;
+  try {
+    await api(`/research/${jobId}/followup`, { method: "POST", body: JSON.stringify({ question }) });
+    $("fu-question").value = ""; $("fu-count").textContent = "0";
+    await poll();
+    $("job").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (e) { showError("fu-error", e.message); $("fu-submit").disabled = false; }
+};
 
 $("copy").onclick = async () => {
   try { await navigator.clipboard.writeText(reportMd); $("copy").textContent = "Copied"; }

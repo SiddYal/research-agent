@@ -105,18 +105,24 @@ def ingest_sources(deps: Deps, job_id: str, sources: list[Source]) -> tuple[list
 @traced("search")
 def search_node(state: ResearchState, deps: Deps) -> dict:
     s = deps.settings
-    queries = [(sq.id, q) for sq in state.plan.subquestions for q in sq.search_queries]
+    queries = [(sq.id, q) for sq in state.active_subquestions() for q in sq.search_queries]
     errors = list(state.errors)
-    sources = collect_sources(deps, queries, [], s.max_sources, s.results_per_query, errors)
-    if not sources:
+    limit = s.followup_max_sources if state.pending_followup() else s.max_sources
+    new = collect_sources(deps, queries, state.sources, limit, s.results_per_query, errors)
+    # A follow-up can still draw on the sources the report already has.
+    if not new and not state.sources:
         raise RuntimeError("web search returned no usable sources")
-    return {"sources": sources, "errors": errors}
+    return {"sources": state.sources + new, "errors": errors}
 
 
 @traced("ingest")
 def ingest_node(state: ResearchState, deps: Deps) -> dict:
-    sources, chunks = ingest_sources(deps, state.job_id, state.sources)
-    if not chunks:
+    chunked = {c.source_id for c in state.chunks}
+    todo = [s for s in state.sources if s.id not in chunked and not s.fetched]
+    ingested, chunks = ingest_sources(deps, state.job_id, todo)
+    if not chunks and not state.chunks:
         raise RuntimeError("no text could be extracted from any source")
-    log.info("ingested", fetched=sum(s.fetched for s in sources), sources=len(sources), chunks=len(chunks))
-    return {"sources": sources, "chunks": chunks}
+    by_id = {s.id: s for s in ingested}
+    sources = [by_id.get(s.id, s) for s in state.sources]
+    log.info("ingested", fetched=sum(s.fetched for s in ingested), sources=len(ingested), chunks=len(chunks))
+    return {"sources": sources, "chunks": state.chunks + chunks}

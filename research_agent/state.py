@@ -112,12 +112,32 @@ class Evaluation(BaseModel):
     llm_calls: int = 0
 
 
+FollowUpStatus = Literal["planning", "awaiting_approval", "running", "completed", "rejected"]
+
+
+class FollowUp(BaseModel):
+    """A reader's question about a finished report, researched and merged into it."""
+
+    question: str
+    asked_at: datetime
+    status: FollowUpStatus = "planning"
+    subquestion_ids: list[str] = Field(default_factory=list)
+    base_cost_usd: float = 0.0  # job cost when asked; each follow-up gets its own budget
+    summary: str = ""  # what changed in the report
+    changed_sections: list[str] = Field(default_factory=list)
+    version: int | None = None  # the report version it produced (None: report unchanged)
+
+
 class ResearchState(BaseModel):
     job_id: str
     question: str
     auto_approve: bool = False
     approved: bool | None = None
     plan: Plan | None = None
+    followups: list[FollowUp] = Field(default_factory=list)
+    # Subquestions the current pass researches; empty means all of them (the first run).
+    active: list[str] = Field(default_factory=list)
+    report_versions: list[str] = Field(default_factory=list)  # earlier reports, oldest first
     sources: list[Source] = Field(default_factory=list)
     chunks: list[Chunk] = Field(default_factory=list)
     retrieved: dict[str, list[str]] = Field(default_factory=dict)  # subquestion id -> chunk ids
@@ -129,6 +149,15 @@ class ResearchState(BaseModel):
     timeline: list[TimelineEvent] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     cost_usd: float = 0.0
+
+    def active_subquestions(self) -> list[SubQuestion]:
+        subqs = self.plan.subquestions if self.plan else []
+        return [sq for sq in subqs if sq.id in self.active] if self.active else subqs
+
+    def pending_followup(self) -> FollowUp | None:
+        """The follow-up being worked on, if any."""
+        last = self.followups[-1] if self.followups else None
+        return last if last and last.status in ("planning", "awaiting_approval", "running") else None
 
     def source(self, source_id: str) -> Source | None:
         return next((s for s in self.sources if s.id == source_id), None)

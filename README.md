@@ -39,7 +39,9 @@ In the app you:
 1. pick the AI model and type your question;
 2. review the research plan: edit, remove or add subquestions, then approve (or reject);
 3. watch each step run, then read the report, with scores, clickable citations, and
-   copy/download buttons. Past research stays in the *Recent research* list.
+   copy/download buttons. Past research stays in the *Recent research* list;
+4. ask follow-up questions under the report. Each one is planned (you review it, as before),
+   researched and verified, then edited into the report; earlier versions stay viewable.
 
 **Manual setup**
 
@@ -82,11 +84,12 @@ docker compose up --build
 | `GET` | `/research/{id}` | status, plan, per-node timeline, metrics, cost |
 | `POST` | `/research/{id}/approve` | `{"approved": true, "plan": <optional edited plan>}` |
 | `POST` | `/research/{id}/resume` | retry a failed job from its last checkpoint |
-| `GET` | `/research/{id}/report` | Markdown; `?format=json` adds sources, claims and verdicts |
+| `POST` | `/research/{id}/followup` | `{"question": "..."}` on a completed job: research it and edit the report |
+| `GET` | `/research/{id}/report` | Markdown; `?format=json` adds sources, claims and verdicts; `?version=1` is the original |
 | `GET` | `/research` | recent jobs |
 
 Job states: `queued → running → awaiting_approval → running → completed`, or `failed` /
-`rejected`. Every response carries an `x-request-id` header that also appears on every log line.
+`rejected`. A follow-up takes a completed job through `running` (and `awaiting_approval`) again. Every response carries an `x-request-id` header that also appears on every log line.
 
 ## Architecture
 

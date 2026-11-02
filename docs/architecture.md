@@ -5,6 +5,10 @@
 ```mermaid
 graph TD
     start([question]) --> planner
+    ask([follow-up question]) --> fplanner[followup_planner]
+    fplanner --> fapproval{followup_approval}
+    fapproval -- rejected --> stop
+    fapproval -- approved --> search
     planner --> approval{human_approval}
     approval -- rejected --> stop([end])
     approval -- approved --> search
@@ -31,8 +35,26 @@ The diagram LangGraph generates from the compiled graph is in [graph.mmd](graph.
 | `extract_claims` | Atomic claims (text, source, chunk, entities, numbers, dates, confidence), near-duplicates dropped | [nodes/verify.py](../research_agent/nodes/verify.py) |
 | `verify` | Gathers evidence from other sources per claim; the LLM labels each passage; `decide_status` turns that into verified / uncertain / contradicted | [nodes/verify.py](../research_agent/nodes/verify.py) |
 | `followup_search` | Targeted search for uncorroborated claims, then back to `verify` (bounded rounds) | [nodes/verify.py](../research_agent/nodes/verify.py) |
-| `writer` | Writes the report from **verified claims only**; appendix and references are generated deterministically | [nodes/writer.py](../research_agent/nodes/writer.py) |
+| `writer` | Writes the report from **verified claims only**; appendix and references are generated deterministically. After a follow-up it **edits** the report instead (see below) | [nodes/writer.py](../research_agent/nodes/writer.py) |
 | `evaluate` | Citation coverage, source diversity, hallucination risk (LLM-as-judge), cost, latency | [evaluation.py](../research_agent/evaluation.py) |
+
+| `followup_planner` | A reader's follow-up question → 1–3 new subquestions, skipping what the report already covers | [nodes/followups.py](../research_agent/nodes/followups.py) |
+| `followup_approval` | `interrupt()`, like `human_approval`, for the follow-up's subquestions (skipped for auto-approved jobs) | [nodes/followups.py](../research_agent/nodes/followups.py) |
+
+## Follow-up questions
+
+`POST /research/{id}/followup` re-enters the finished job's checkpoint thread from `START`, which routes
+to `followup_planner`. The new subquestions are appended to the plan and listed in `state.active`, so
+search, ingest, retrieval, extraction and verification only work on them, adding to the sources,
+chunks and claims already there. Earlier claims keep their verdicts; new ones are verified against
+every source, old and new.
+
+The writer then edits the report rather than writing a new one. The model returns section edits
+(`append` to a section, `insert` a new one, or `replace` one to correct it), which are applied in
+code, so untouched sections stay word for word. A rewrite that loses any of its section's citations is
+redone once; if it still loses them, that section is kept as it was. The appendix and references are
+regenerated, the report is re-scored, and the previous text is kept as an earlier version
+(`GET /research/{id}/report?version=1` is the original). Each follow-up gets its own spend limit.
 
 ## ResearchState
 

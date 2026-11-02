@@ -6,6 +6,7 @@
     GET  /research/{id}            status, plan, timeline, metrics
     POST /research/{id}/approve    approve / edit / reject the plan
     POST /research/{id}/resume     retry a failed job from its last checkpoint
+    POST /research/{id}/followup   research a follow-up question and edit the report
     GET  /research/{id}/report     the report (Markdown, or JSON with sources & claims)
     GET  /health
 """
@@ -84,6 +85,10 @@ class ResearchRequest(BaseModel):
     model: str | None = Field(default=None, description="An id from GET /models; omit for the default")
 
 
+class FollowUpRequest(BaseModel):
+    question: str = Field(min_length=10, max_length=500)
+
+
 class ApprovalRequest(BaseModel):
     approved: bool = True
     plan: dict | None = Field(default=None, description="Optionally, an edited plan to use instead")
@@ -152,17 +157,36 @@ def resume_research(request: Request, job_id: str):
     return {"job_id": job_id, "status": "running"}
 
 
+@app.post("/research/{job_id}/followup", status_code=202)
+@limiter.limit(settings.rate_limit)
+def ask_followup(request: Request, job_id: str, body: FollowUpRequest):
+    svc = service(request)
+    _job_or_404(svc, job_id)
+    if svc.spent_today() >= settings.daily_cost_cap_usd:
+        raise HTTPException(429, "the demo's daily spend cap has been reached; please try again tomorrow")
+    try:
+        svc.ask(job_id, body.question)
+    except InvalidJobState as e:
+        raise HTTPException(409, str(e))
+    return {"job_id": job_id, "status": "running"}
+
+
 @app.get("/research/{job_id}/report")
-def get_report(request: Request, job_id: str, format: str = "md"):
+def get_report(request: Request, job_id: str, format: str = "md", version: int | None = None):
+    """`version` picks an earlier report (1 = the original, before any follow-ups)."""
     svc = service(request)
     _job_or_404(svc, job_id)
     job = svc.get_job_row(job_id)
     if job.report is None:
         raise HTTPException(409, f"report not ready (status: {job.status})")
+    report = job.report if version is None else svc.report_version(job_id, version)
+    if report is None:
+        raise HTTPException(404, f"no version {version} of this report")
     if format == "json":
-        return {"job_id": job_id, "question": job.question, "report": job.report,
-                "evaluation": job.evaluation, **(job.result or {})}
-    return PlainTextResponse(job.report, media_type="text/markdown; charset=utf-8")
+        extra = {k: v for k, v in (job.result or {}).items() if k != "versions"}
+        return {"job_id": job_id, "question": job.question, "report": report,
+                "evaluation": job.evaluation, **extra}
+    return PlainTextResponse(report, media_type="text/markdown; charset=utf-8")
 
 
 @app.get("/health")

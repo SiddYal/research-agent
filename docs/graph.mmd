@@ -15,9 +15,15 @@ graph TD;
 	followup_search(followup_search)
 	writer(writer)
 	evaluate(evaluate)
+	followup_planner(followup_planner)
+	followup_approval(followup_approval)
 	__end__([<p>__end__</p>]):::last
-	__start__ --> planner;
+	__start__ -.-> followup_planner;
+	__start__ -.-> planner;
 	extract_claims --> verify;
+	followup_approval -.-> __end__;
+	followup_approval -.-> search;
+	followup_planner --> followup_approval;
 	followup_search --> verify;
 	human_approval -.-> __end__;
 	human_approval -.-> search;

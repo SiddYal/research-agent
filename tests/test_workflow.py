@@ -74,6 +74,136 @@ def test_approve_and_retry_mark_the_job_running_before_returning(svc, sql_deps, 
     assert job["status"] == "running" and job["error"] is None and submitted[-1] == failed
 
 
+VISITORS_Q = "How many people visit the Eiffel Tower each year?"
+
+
+def completed_job(svc, auto_approve=False) -> str:
+    job_id = svc.create_job("What are the key facts about the Eiffel Tower?", auto_approve=auto_approve)
+    assert svc.run(job_id) == ("completed" if auto_approve else "awaiting_approval")
+    if not auto_approve:
+        assert svc.approve(job_id, background=False) == "completed"
+    return job_id
+
+
+def test_followup_edits_the_report_and_keeps_the_earlier_version(svc, sql_deps):
+    from research_agent.evaluation import report_body
+    from research_agent.nodes.writer import split_sections
+
+    job_id = completed_job(svc)
+    original = svc.get_job_row(job_id).report
+    planner_calls = sum(1 for name, _ in sql_deps.llm.calls if name == "_PlanOut")
+
+    assert svc.ask(job_id, VISITORS_Q, background=False) == "awaiting_approval"
+    fu = svc.get_job(job_id)["followups"][-1]
+    assert fu["status"] == "awaiting_approval" and fu["question"] == VISITORS_Q
+    assert [q["id"] for q in fu["subquestions"]] == ["Q3"]
+
+    assert svc.approve(job_id, background=False) == "completed"
+    job, report = svc.get_job(job_id), svc.get_job_row(job_id).report
+    fu = job["followups"][-1]
+    assert fu["status"] == "completed" and fu["changed_sections"] == ["Visitors"] and fu["version"] == 2
+    assert job["version"] == 2 and svc.report_version(job_id, 1) == original
+
+    # Edited, not rewritten: every original section is still there word for word.
+    _, before = split_sections(report_body(original))
+    _, after = split_sections(report_body(report))
+    assert [s for s in after if s[0] != "Visitors"] == before
+    assert after[1][0] == "Visitors" and "7 million visitors" in after[1][1]
+
+    # Only the follow-up's subquestion was researched, and the new source is cited.
+    new_source = next(s for s in svc.state(job_id).sources if "visitors" in s.url)
+    assert f"[{new_source.id}]" in report.split("## References")[1]
+    assert sum(1 for name, _ in sql_deps.llm.calls if name == "_PlanOut") == planner_calls
+    claims = svc.state(job_id).verified_claims
+    assert any(c.subquestion_id == "Q3" and c.status == "verified" for c in claims)
+    assert FALSE_FACT not in report.split("## Contested")[0]
+
+
+def test_followup_edit_that_drops_content_keeps_the_section_and_the_rest(svc, sql_deps):
+    """A rewrite that loses a section's citations is redone; if it still loses them, that section
+    stays as it was, and the rest of the edit (here, a new section) is kept."""
+    from research_agent.nodes import writer as writer_mod
+
+    careless = writer_mod._Edit(action="replace", section="Executive summary", content="A shorter summary.")
+
+    class CarelessLLM(type(sql_deps.llm)):
+        def structured(self, system, user, schema, max_tokens=4000):
+            if schema is writer_mod._Revision:
+                good = super().structured(system, user, schema, max_tokens).edits
+                first = sum(n == "_Revision" for n, _ in self.calls) == 1
+                return schema(edits=[careless, *good] if first else [careless], summary="Shortened it.")
+            return super().structured(system, user, schema, max_tokens)
+
+    job_id = completed_job(svc, auto_approve=True)
+    summary_before = svc.get_job_row(job_id).report.split("## Conclusion")[0].split("## Executive summary")[1]
+    sql_deps.llm.__class__ = CarelessLLM
+    assert svc.ask(job_id, VISITORS_Q, background=False) == "completed"
+    prompts = [u for n, u in sql_deps.llm.calls if n == "_Revision"]
+    assert len(prompts) == 2 and '"Executive summary" no longer cites' in prompts[1]
+
+    report = svc.get_job_row(job_id).report
+    assert summary_before.strip() in report and "A shorter summary." not in report
+    assert "## Visitors" in report
+    fu = svc.get_job(job_id)["followups"][-1]
+    assert fu["changed_sections"] == ["Visitors"] and fu["summary"] == "Updated: Visitors." and fu["version"] == 2
+
+
+def test_edited_followup_plan_is_what_gets_researched(svc, sql_deps):
+    job_id = completed_job(svc)
+    svc.ask(job_id, VISITORS_Q, background=False)
+    edited = {"subquestions": [{"id": "Q3", "question": "How many visitors does the Eiffel Tower get a year?",
+                                "search_queries": []}]}
+    assert svc.approve(job_id, plan=edited, background=False) == "completed"
+    subqs = svc.state(job_id).plan.subquestions
+    assert [(q.id, q.question) for q in subqs][-1] == ("Q3", "How many visitors does the Eiffel Tower get a year?")
+    assert len(subqs) == 3 and "How many visitors does the Eiffel Tower get a year?" in sql_deps.search.calls
+
+
+def test_rejected_followup_leaves_the_report_alone(svc):
+    job_id = completed_job(svc)
+    original = svc.get_job_row(job_id).report
+    assert svc.ask(job_id, VISITORS_Q, background=False) == "awaiting_approval"
+    assert svc.approve(job_id, approved=False, background=False) == "completed"
+    job = svc.get_job(job_id)
+    assert job["followups"][-1]["status"] == "rejected" and job["version"] == 1
+    assert svc.get_job_row(job_id).report == original
+    assert [q.id for q in svc.state(job_id).plan.subquestions] == ["Q1", "Q2"]
+
+
+def test_followups_on_auto_approved_jobs_run_straight_through(svc):
+    job_id = completed_job(svc, auto_approve=True)
+    assert svc.ask(job_id, VISITORS_Q, background=False) == "completed"
+    assert svc.ask(job_id, "Which other monuments in Paris get many visitors?", background=False) == "completed"
+    job = svc.get_job(job_id)
+    assert [f["status"] for f in job["followups"]] == ["completed", "completed"]
+    # The second follow-up found nothing new to verify, so the text stayed the same.
+    assert job["followups"][1]["version"] is None and job["version"] == 2
+
+
+def test_followup_needs_a_completed_report(svc):
+    job_id = svc.create_job("What are the key facts about the Eiffel Tower?")
+    svc.run(job_id)
+    with pytest.raises(InvalidJobState):
+        svc.ask(job_id, VISITORS_Q)
+
+
+def test_apply_edits_only_touches_the_named_sections():
+    from research_agent.nodes.writer import _Edit, apply_edits
+
+    body = "# T\n\n## Executive summary\n\nA [S1].\n\n## Height\n\nB [S2].\n\n## Conclusion\n\nC."
+    out, changed = apply_edits(body, [
+        _Edit(action="replace", section="height", content="B, now 330 m [S2][S4]."),
+        _Edit(action="insert", section="Not a heading", heading="Visitors", content="D [S4]."),
+    ])
+    assert out == ("# T\n\n## Executive summary\n\nA [S1].\n\n## Height\n\nB, now 330 m [S2][S4]."
+                   "\n\n## Visitors\n\nD [S4].\n\n## Conclusion\n\nC.")
+    assert changed == ["Height", "Visitors"]
+
+    out, changed = apply_edits(body, [_Edit(action="append", section="Conclusion", content="E [S4]."),
+                                      _Edit(action="replace", section="Height", content="B [S2].")])
+    assert out.endswith("## Conclusion\n\nC.\n\nE [S4].") and changed == ["Conclusion"]  # a no-op replace
+
+
 def test_failed_node_resumes_without_rerunning_earlier_nodes(svc, sql_deps):
     job_id = svc.create_job("What are the key facts about the Eiffel Tower?", auto_approve=True)
     sql_deps.llm.fail_on = verify_mod._Verdicts
@@ -227,6 +357,26 @@ def test_api_end_to_end(client):
     full = client.get(f"/research/{job_id}/report?format=json").json()
     assert full["sources"] and full["claims"] and full["evaluation"]
     assert any(j["job_id"] == job_id for j in client.get("/research").json())
+
+
+def test_api_followup(client):
+    job_id = client.post("/research", json={"question": "What are the key facts about the Eiffel Tower?",
+                                            "auto_approve": True}).json()["job_id"]
+    assert client.post(f"/research/{job_id}/followup", json={"question": VISITORS_Q}).status_code == 409
+    wait_for(client, job_id, {"completed"})
+    original = client.get(f"/research/{job_id}/report").text
+
+    r = client.post(f"/research/{job_id}/followup", json={"question": VISITORS_Q})
+    assert r.status_code == 202
+    # Listed and running at once, so the UI can follow it.
+    job = client.get(f"/research/{job_id}").json()
+    assert job["followups"][-1]["question"] == VISITORS_Q and job["status"] in ("running", "completed")
+    job = wait_for(client, job_id, {"completed", "failed"})
+    assert job["status"] == "completed" and job["version"] == 2, job["error"]
+    assert "## Visitors" in client.get(f"/research/{job_id}/report").text
+    assert client.get(f"/research/{job_id}/report?version=1").text == original
+    assert client.get(f"/research/{job_id}/report?version=9").status_code == 404
+    assert client.post(f"/research/{job_id}/followup", json={"question": "short"}).status_code == 422
 
 
 def test_api_validation_and_404(client):

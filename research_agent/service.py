@@ -35,7 +35,7 @@ from research_agent.llm import (
 )
 from research_agent.logging import get_logger
 from research_agent.nodes import Deps
-from research_agent.state import ResearchState, TimelineEvent
+from research_agent.state import FollowUp, ResearchState, TimelineEvent
 from research_agent.storage import make_artifact_store
 from research_agent.tools.fetch import PageFetcher
 from research_agent.tools.search import make_search
@@ -117,19 +117,21 @@ class ResearchService:
         log.info("job_created", job_id=job_id, model=model)
         return job_id
 
-    def submit(self, job_id: str, resume: dict | None = None) -> Future:
+    def submit(self, job_id: str, resume: dict | None = None, followup: FollowUp | None = None) -> Future:
         """Runs the next segment of a job in the background."""
-        return self.pool.submit(self.run, job_id, resume)
+        return self.pool.submit(self.run, job_id, resume, followup)
 
-    def run(self, job_id: str, resume: dict | None = None) -> str:
-        """Runs a job until it completes, fails, or pauses for approval. Returns the new status."""
+    def run(self, job_id: str, resume: dict | None = None, followup: FollowUp | None = None) -> str:
+        """Runs a job until it completes, fails, or pauses for approval. Returns the new status.
+
+        `followup` starts a reader's follow-up question on a completed job."""
         with self._lock:
             if job_id in self._running:
                 raise InvalidJobState("job is already running")
             self._running.add(job_id)
         structlog.contextvars.bind_contextvars(job_id=job_id)
         try:
-            return self._run(job_id, resume)
+            return self._run(job_id, resume, followup)
         finally:
             structlog.contextvars.unbind_contextvars("job_id")
             with self._lock:
@@ -140,6 +142,20 @@ class ResearchService:
             raise InvalidJobState(f"job is {self.get_job_row(job_id).status}, not awaiting approval")
         decision = {"approved": approved, "plan": plan}
         return self.submit(job_id, decision) if background else self.run(job_id, decision)
+
+    def ask(self, job_id: str, question: str, background: bool = True):
+        """Researches a follow-up question on a completed job and edits its report."""
+        if not self._claim(job_id, ("completed",)):
+            raise InvalidJobState(f"job is {self.get_job_row(job_id).status}; follow-up questions "
+                                  "can be asked once the report is complete")
+        job = self.get_job_row(job_id)
+        fu = FollowUp(question=question.strip(), asked_at=_utcnow(), base_cost_usd=job.cost_usd or 0.0)
+        # Listed straight away, so a client polling the job can show the follow-up's progress.
+        result = dict(job.result or {})
+        result["followups"] = result.get("followups", []) + [
+            fu.model_dump(mode="json", exclude={"base_cost_usd"}) | {"subquestions": []}]
+        self._update(job_id, result=result)
+        return self.submit(job_id, followup=fu) if background else self.run(job_id, followup=fu)
 
     def resume(self, job_id: str, background: bool = True):
         """Retries a failed job from its last checkpoint (completed nodes are not re-run)."""
@@ -200,7 +216,15 @@ class ResearchService:
             ],
             "has_report": job.report is not None,
             "artifacts": self.artifact_links(job),
+            "followups": (job.result or {}).get("followups", []),
+            "version": len((job.result or {}).get("versions", [])) + 1,
         }
+
+    def report_version(self, job_id: str, version: int) -> str | None:
+        """An earlier version of the report (1 = the original); the current one is the last."""
+        job = self.get_job_row(job_id)
+        versions = (job.result or {}).get("versions", []) + [job.report]
+        return versions[version - 1] if 1 <= version <= len(versions) else None
 
     def list_jobs(self, limit: int = 20) -> list[dict]:
         with session_scope() as s:
@@ -219,11 +243,17 @@ class ResearchService:
 
     # ------------------------------------------------------------ internals
 
-    def _run(self, job_id: str, resume: dict | None) -> str:
+    def _run(self, job_id: str, resume: dict | None, followup: FollowUp | None = None) -> str:
         job = self.get_job_row(job_id)
         config = {"configurable": {"thread_id": job_id}}
         snap = self.graph.get_state(config)
-        if resume is not None:
+        st = ResearchState.model_validate(snap.values) if snap.values else None
+        if followup is not None:
+            # Re-enter the finished thread from START; it routes to the follow-up planner.
+            st = st.model_copy(update={"followups": st.followups + [followup], "active": [],
+                                       "verification_round": 0})
+            graph_input = st.model_dump()
+        elif resume is not None:
             graph_input = Command(resume=resume)
         elif snap.values:
             graph_input = None  # continue from the last checkpoint
@@ -233,7 +263,9 @@ class ResearchService:
 
         self._update(job_id, status="running", error=None)
         try:
-            with metered(budget_usd=self.settings.max_job_cost_usd, base_cost_usd=job.cost_usd or 0.0):
+            pending = st.pending_followup() if st else None
+            budget = self.settings.max_job_cost_usd + (pending.base_cost_usd if pending else 0.0)
+            with metered(budget_usd=budget, base_cost_usd=job.cost_usd or 0.0):
                 self.graph_for(job.model).invoke(graph_input, config)
         except BudgetExceeded as e:
             log.error("job_budget_exceeded", error=str(e))
@@ -249,6 +281,10 @@ class ResearchService:
         fields: dict = {}
         if st and st.plan:
             fields.update(objective=st.plan.objective, plan=st.plan.model_dump())
+        result = dict(self.get_job_row(job_id).result or {})
+        if st and st.followups:
+            result.update(self._followup_summary(st))
+            fields["result"] = result
 
         if error:
             status = "failed"
@@ -261,7 +297,7 @@ class ResearchService:
         elif not snap.next and st and st.report:
             status = "completed"
             evaluation = finalize_totals(st.evaluation, st) if st.evaluation else None
-            result = self._result_summary(st)
+            result = self._result_summary(st) | self._followup_summary(st)
             result["artifacts"] = self._save_artifacts(st, evaluation)
             fields.update(
                 report=st.report,
@@ -287,6 +323,16 @@ class ResearchService:
             "errors": st.errors,
         }
 
+    @staticmethod
+    def _followup_summary(st: ResearchState) -> dict:
+        subqs = {sq.id: sq for sq in st.plan.subquestions} if st.plan else {}
+        followups = []
+        for fu in st.followups:
+            item = fu.model_dump(mode="json", exclude={"base_cost_usd"})
+            item["subquestions"] = [subqs[i].model_dump() for i in fu.subquestion_ids if i in subqs]
+            followups.append(item)
+        return {"followups": followups, "versions": st.report_versions}
+
     def _save_artifacts(self, st: ResearchState, evaluation) -> dict[str, str]:
         """Write the report and full run record locally, and to object storage when configured.
 
@@ -299,10 +345,12 @@ class ResearchService:
                                      "evaluation": evaluation.model_dump() if evaluation else None},
                                     indent=2).encode("utf-8"), "application/json"),
         }
+        for n, text in enumerate(st.report_versions, 1):  # earlier versions, after follow-ups
+            files[f"report.v{n}.md"] = (text.encode("utf-8"), "text/markdown; charset=utf-8")
         out = Path(self.settings.reports_dir)
         out.mkdir(parents=True, exist_ok=True)
-        (out / f"{st.job_id}.md").write_bytes(files["report.md"][0])
-        (out / f"{st.job_id}.json").write_bytes(files["run.json"][0])
+        for name, (body, _) in files.items():  # report.md -> <job>.md, report.v1.md -> <job>.v1.md
+            (out / f"{st.job_id}{name.removeprefix('report').removeprefix('run')}").write_bytes(body)
 
         keys: dict[str, str] = {}
         if self.artifacts is not None:
