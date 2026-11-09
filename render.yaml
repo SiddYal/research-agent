@@ -1,11 +1,14 @@
 # Render blueprint: one Docker web service. Copy the values `neon deploy` wrote to
 # .env: DATABASE_URL (pooled) and DATABASE_URL_UNPOOLED (direct, for migrations);
 # the migration enables pgvector. The AWS_* values store reports in Neon's bucket.
+# Free plan: the service sleeps after 15 idle minutes and takes about a minute to
+# wake; a job interrupted by a restart resumes from its checkpoint on startup.
 services:
   - type: web
     name: research-agent
     runtime: docker
-    plan: starter
+    plan: free
+    region: ohio  # next to the Neon database (aws us-east-2): a job makes many queries
     healthCheckPath: /health
     envVars:
       - key: OPENAI_API_KEY
